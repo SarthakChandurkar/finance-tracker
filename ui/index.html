@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Finance Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header>
+      <h1>Finance Tracker</h1>
+      <nav>
+        <button data-view="dashboard" class="active">Dashboard</button>
+        <button data-view="transactions">Transactions</button>
+        <button data-view="quotas">Quotas</button>
+        <button data-view="categories">Categories</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="dashboard" class="view active">
+        <h2>Dashboard</h2>
+        <div class="dashboard-grid">
+          <div class="card">
+            <h3>Quota Breakdowns</h3>
+            <div id="quota-breakdowns"></div>
+          </div>
+          <div class="card">
+            <h3>Category Totals</h3>
+            <div id="category-totals"></div>
+          </div>
+          <div class="card">
+            <h3>Loan Ledger</h3>
+              <div id="loan-ledger"></div>
+          </div>
+        </div>
+        <div class="panel schedule-panel">
+          <h3>System Actions</h3>
+          <div class="actions-row">
+            <button id="run-month-start">Run Month Start</button>
+            <button id="run-month-end">Run Month End</button>
+          </div>
+          <div id="system-status" class="status"></div>
+        </div>
+      </section>
+
+      <section id="transactions" class="view">
+        <h2>Transactions</h2>
+        <div class="panel">
+          <form id="transaction-form" class="form-grid">
+            <div class="full-width">
+              <h4 id="transaction-form-heading">Create Transaction</h4>
+            </div>
+            <div>
+              <label for="tx-type">Type</label>
+              <select id="tx-type" name="type"></select>
+            </div>
+            <div>
+              <label for="tx-amount">Amount</label>
+              <input id="tx-amount" name="amount" type="number" step="0.01" required />
+            </div>
+            <div>
+              <label for="tx-source">Source Quota</label>
+              <select id="tx-source" name="source_quota_id"></select>
+            </div>
+            <div>
+              <label for="tx-destination">Destination Quota</label>
+              <select id="tx-destination" name="destination_quota_id"></select>
+            </div>
+            <div>
+              <label for="tx-category">Category</label>
+              <select id="tx-category" name="category"></select>
+            </div>
+            <div>
+              <label for="tx-counterparty">Counterparty</label>
+              <input id="tx-counterparty" name="counterparty" type="text" />
+            </div>
+            <div>
+              <label for="tx-payment-mode">Payment Mode</label>
+              <select id="tx-payment-mode" name="payment_mode"></select>
+            </div>
+            <div>
+              <label for="tx-payment-instrument">Payment Instrument</label>
+              <select id="tx-payment-instrument" name="payment_instrument"></select>
+            </div>
+            <div>
+              <label for="tx-date">Date</label>
+              <input id="tx-date" name="date" type="date" required />
+            </div>
+            <div class="full-width">
+              <label for="tx-details">Details</label>
+              <textarea id="tx-details" name="details"></textarea>
+            </div>
+            <div class="full-width actions">
+              <button id="tx-submit" type="submit">Save Transaction</button>
+              <button id="tx-cancel" type="button">Cancel</button>
+            </div>
+            <div class="form-error" id="tx-error"></div>
+          </form>
+        </div>
+
+        <div class="panel hidden" id="funding-panel">
+          <h3>Funding Options</h3>
+          <div id="funding-message"></div>
+          <ul id="funding-options-list"></ul>
+          <div class="full-width actions">
+            <button id="funding-cancel" type="button">Cancel</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3>Recent Transactions</h3>
+          <table id="transaction-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Category</th>
+                <th>Counterparty</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="quotas" class="view">
+        <h2>Quotas</h2>
+        <div class="panel">
+          <form id="quota-form" class="form-grid">
+            <div class="full-width">
+              <h4 id="quota-form-heading">Create Quota</h4>
+            </div>
+            <div>
+              <label for="quota-mode">Mode</label>
+              <select id="quota-mode" name="mode"></select>
+              <div id="quota-mode-note" style="font-size:0.9rem; color:#6b7280; margin-top:6px"></div>
+            </div>
+            <div>
+              <label for="quota-name">Name</label>
+              <input id="quota-name" name="name" type="text" required />
+            </div>
+            <div>
+              <label for="quota-monthly-allocation">Monthly Allocation</label>
+              <input id="quota-monthly-allocation" name="monthly_allocation" type="number" step="0.01" />
+            </div>
+            <div>
+              <label for="quota-target-amount">Target Amount</label>
+              <input id="quota-target-amount" name="target_amount" type="number" step="0.01" />
+            </div>
+            <div>
+              <label for="quota-eom-destination">EOM Sweep Destination</label>
+              <select id="quota-eom-destination" name="eom_sweep_destination"></select>
+            </div>
+            <div class="full-width actions">
+              <button id="quota-submit" type="submit">Create Quota</button>
+              <button id="quota-cancel" type="button">Cancel</button>
+            </div>
+            <div class="form-error" id="quota-error"></div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>Active Quotas</h3>
+          <table id="quota-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Scope</th>
+                <th>Monthly Allocation</th>
+                <th>Target Amount</th>
+                <th>EOM Destination</th>
+                <th>Archived</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="categories" class="view">
+        <h2>Categories</h2>
+        <div class="panel">
+          <form id="category-form" class="form-grid">
+            <div>
+              <label for="category-name">Name</label>
+              <input id="category-name" name="name" type="text" required />
+            </div>
+            <div class="full-width actions">
+              <button type="submit">Create Category</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>Rename / Delete</h3>
+          <form id="recategorize-form" class="form-grid">
+            <div>
+              <label for="source-category">From</label>
+              <select id="source-category" name="source_category_id"></select>
+            </div>
+            <div>
+              <label for="dest-category">To</label>
+              <select id="dest-category" name="dest_category_id"></select>
+            </div>
+            <div class="full-width actions">
+              <button type="submit">Recategorize</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="panel">
+          <h3>Categories</h3>
+          <table id="category-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+  <div id="loan-settle-panel" class="panel hidden">
+    <h3>Settle Loan</h3>
+    <div>
+      <label>Counterparty</label>
+      <div id="settle-counterparty"></div>
+    </div>
+    <div>
+      <label for="settle-amount">Amount</label>
+      <input id="settle-amount" type="number" step="0.01" />
+    </div>
+    <div>
+      <label for="settle-source">Source Quota</label>
+      <select id="settle-source"></select>
+    </div>
+    <div class="full-width actions">
+      <button id="settle-send">Settle</button>
+      <button id="settle-cancel" type="button">Cancel</button>
+    </div>
+  </div>
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h3 id="confirm-title">Confirm</h3>
+      <div id="confirm-message"></div>
+      <div id="confirm-details" style="margin-top:8px; color:#6b7280"></div>
+      <div class="full-width actions" style="margin-top:1rem;">
+        <button id="confirm-yes">Yes</button>
+        <button id="confirm-no" type="button">No</button>
+      </div>
+    </div>
+  </div>
+  <div id="toasts" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

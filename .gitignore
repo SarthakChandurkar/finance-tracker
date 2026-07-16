@@ -1,0 +1,19 @@
+# Local JSON datastore
+data.json
+
+# Temporary files
+*.tmp
+*.log
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo

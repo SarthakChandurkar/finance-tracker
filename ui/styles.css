@@ -1,0 +1,216 @@
+:root {
+  color-scheme: light;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f4f6fb;
+  color: #1f2937;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: linear-gradient(180deg, #eef2ff 0%, #f8fafc 100%);
+}
+
+.app-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 1.75rem;
+}
+
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+nav button {
+  padding: 0.75rem 1rem;
+  border: 1px solid #dbeafe;
+  background: white;
+  color: #1f2937;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+nav button.active,
+nav button:hover {
+  background: #6366f1;
+  color: white;
+  border-color: transparent;
+}
+
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Confirmation modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15,23,42,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.modal {
+  background: white;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  width: 90%;
+  max-width: 480px;
+  box-shadow: 0 10px 25px rgba(2,6,23,0.2);
+}
+.modal h3 {
+  margin-top: 0;
+}
+.modal .actions {
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.note {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin-top: 6px;
+}
+
+/* Toasts */
+#toasts {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 80;
+}
+.toast {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  color: white;
+  min-width: 200px;
+  box-shadow: 0 6px 18px rgba(2,6,23,0.15);
+}
+.toast.success { background: #16a34a; }
+.toast.error { background: #dc2626; }
+
+.panel,
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
+  padding: 1.25rem;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  margin-bottom: 1rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+  color: #374151;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  background: #f8fafc;
+  color: #111827;
+}
+
+textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.85rem;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+thead {
+  background: #f3f4f6;
+}
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+button[type="submit"],
+.schedule-panel button {
+  border: none;
+  background: #4f46e5;
+  color: white;
+  padding: 0.85rem 1.25rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+}
+
+button[type="submit"]:hover,
+.schedule-panel button:hover {
+  background: #4338ca;
+}
+
+.actions-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.status {
+  margin-top: 1rem;
+  font-size: 0.95rem;
+}
