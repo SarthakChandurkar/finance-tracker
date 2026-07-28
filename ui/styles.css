@@ -35,6 +35,34 @@ header h1 {
   font-size: 1.75rem;
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hamburger {
+  display: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.75rem;
+  background: white;
+  cursor: pointer;
+  padding: 0.5rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.hamburger span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: #374151;
+  border-radius: 1px;
+  margin: 3px 0;
+}
+
 nav {
   display: flex;
   flex-wrap: wrap;
@@ -168,7 +196,23 @@ textarea {
 
 table {
   width: 100%;
+  min-width: 760px;
   border-collapse: collapse;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-wrapper table {
+  width: 100%;
+  min-width: 760px;
+}
+
+thead {
+  background: #f3f4f6;
 }
 
 th,
@@ -176,10 +220,38 @@ td {
   padding: 0.85rem;
   border-bottom: 1px solid #e5e7eb;
   text-align: left;
+  white-space: nowrap;
+  word-break: normal;
 }
 
-thead {
-  background: #f3f4f6;
+@media (max-width: 640px) {
+  .table-wrapper table {
+    min-width: 640px;
+  }
+}
+
+button {
+  border: 1px solid transparent;
+  background: #eef2ff;
+  color: #1f2937;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+button:hover {
+  background: #dbeafe;
+}
+
+button:focus-visible {
+  outline: 3px solid rgba(99,102,241,0.45);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .actions {
@@ -213,4 +285,87 @@ button[type="submit"]:hover,
 .status {
   margin-top: 1rem;
   font-size: 0.95rem;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    padding: 1rem;
+  }
+
+  header {
+    align-items: flex-start;
+  }
+
+  nav {
+    justify-content: space-between;
+  }
+
+  .form-grid,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .hamburger {
+    display: inline-flex;
+  }
+
+  nav {
+    position: absolute;
+    top: 84px;
+    left: 0;
+    right: 0;
+    background: white;
+    border-top: 1px solid #e5e7eb;
+    padding: 1rem;
+    flex-direction: column;
+    gap: 0.75rem;
+    display: none;
+    z-index: 20;
+  }
+
+  nav.open {
+    display: flex;
+  }
+
+  nav button {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  header {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  nav {
+    width: 100%;
+  }
+
+  nav button {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .actions,
+  .actions-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modal {
+    width: calc(100% - 2rem);
+    max-width: 100%;
+    margin: 0 1rem;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    min-height: 48px;
+  }
 }

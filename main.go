@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,10 +14,45 @@ import (
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
+
+	// Assuming your internal packages are here
 	"financetracker/internal/domain"
 	"financetracker/internal/models"
 	"financetracker/internal/storage"
 )
+
+var ctx = context.Background()
+
+var rdb *redis.Client
+
+func init() {
+	err := godotenv.Load() // loads .env from current directory
+	if err != nil {
+		log.Println("no .env file found, relying on system env vars")
+	}
+	rdb = redis.NewClient(NewRedisOptions())
+
+	pong, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		log.Fatalf("could not connect to redis: %v", err)
+	}
+	fmt.Println("Connected to Redis DB:", pong)
+}
+
+func NewRedisOptions() *redis.Options {
+	db, _ := strconv.Atoi(os.Getenv("REDIS_DB"))
+
+	opts := &redis.Options{
+		Addr:     os.Getenv("REDIS_ADDR"), // e.g. "host:port"
+		Username: os.Getenv("REDIS_USER"),
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       db,
+	}
+
+	return opts
+}
 
 type apiServer struct {
 	store           *storage.Store
@@ -27,15 +63,17 @@ type apiServer struct {
 	schedule        *domain.ScheduleService
 }
 
+// ... (your routes function stays exactly the same) ...
+
 func main() {
-	dataFile := os.Getenv("DATA_FILE")
-	if dataFile == "" {
-		dataFile = "data.json"
+	redisKey := os.Getenv("REDIS_DATA_KEY")
+	if redisKey == "" {
+		redisKey = "financetracker:data"
 	}
 
-	store := storage.NewStore(dataFile)
+	store := storage.NewStore(rdb, redisKey)
 	if err := store.Load(); err != nil {
-		log.Fatalf("failed to load data file: %v", err)
+		log.Fatalf("failed to load data from redis: %v", err)
 	}
 
 	server := &apiServer{
@@ -49,11 +87,34 @@ func main() {
 
 	addr := os.Getenv("ADDR")
 	if addr == "" {
-		addr = ":8080"
+		addr = ":2911"
 	}
 
-	log.Printf("starting finance tracker backend on %s (data file=%s)", addr, dataFile)
-	log.Fatal(http.ListenAndServe(addr, server.routes()))
+	log.Printf("starting finance tracker backend on %s", addr)
+
+	// 1. Grab your fully built router
+	baseHandler := server.routes()
+
+	// 2. Create a custom http.Server instead of using http.ListenAndServe directly
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: baseHandler,
+	}
+
+	// 3. Configure the native Protocols to allow unencrypted HTTP/2
+	srv.Protocols = new(http.Protocols)
+	srv.Protocols.SetHTTP1(true)
+	srv.Protocols.SetUnencryptedHTTP2(true)
+
+	// 4. Start the server!
+	log.Fatal(srv.ListenAndServe())
+}
+
+func (s *apiServer) monthCatchUpMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		catchUpIfMonthChanged(s.store, s.schedule, time.Now())
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *apiServer) routes() http.Handler {
@@ -72,11 +133,13 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("/api/export", s.handleExport)
 	mux.HandleFunc("/api/import", s.handleImport)
 	mux.HandleFunc("/api/loan-ledger", s.handleLoanLedger)
-	mux.HandleFunc("/api/schedule/start", s.handleScheduleStart)
+	mux.HandleFunc("/api/inter-quota-loans", s.handleInterQuotaLoans)
+	mux.HandleFunc("/api/inter-quota-loans/settle", s.handleSettleInterQuotaLoan)
 	mux.HandleFunc("/api/schedule/end", s.handleScheduleEnd)
 	mux.HandleFunc("/api/funding-options", s.handleFundingOptions)
 	mux.Handle("/", http.FileServer(http.Dir("ui")))
-	return mux
+
+	return s.monthCatchUpMiddleware(mux)
 }
 
 func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +213,7 @@ func (s *apiServer) handleQuotas(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Mode                models.CreationMode `json:"mode"`
 			Name                string              `json:"name"`
-			MonthlyAllocation   float64             `json:"monthly_allocation,omitempty"`
+			MonthlyAllocation   *float64            `json:"monthly_allocation,omitempty"`
 			TargetAmount        float64             `json:"target_amount,omitempty"`
 			EOMSweepDestination string              `json:"eom_sweep_destination,omitempty"`
 		}
@@ -158,7 +221,7 @@ func (s *apiServer) handleQuotas(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		created, err := s.quotaService.CreateQuota(req.Mode, req.Name, req.MonthlyAllocation, req.TargetAmount, req.EOMSweepDestination)
+		created, err := s.quotaService.CreateQuota(req.Mode, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -227,14 +290,14 @@ func (s *apiServer) handleQuotaByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		saved, err := s.quotaService.UpdateQuota(id, req.Name, req.MonthlyAllocation, req.TargetAmount, req.EOMSweepDestination)
+		saved, err := s.quotaService.UpdateQuota(id, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)
 	case http.MethodDelete:
-		saved, err := s.quotaService.ArchiveQuota(id)
+		saved, err := s.quotaService.DeleteQuota(id)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -317,6 +380,15 @@ func (s *apiServer) handleCategoryByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := path.Base(r.URL.Path)
 	switch r.Method {
+
+	case http.MethodGet:
+		category, err := s.categoryService.GetCategoryByID(id)
+		if err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, category)
+
 	case http.MethodPut:
 		var req struct {
 			Name string `json:"name"`
@@ -401,19 +473,6 @@ func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "imported"})
 }
 
-func (s *apiServer) handleScheduleStart(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	now := time.Now()
-	if err := s.schedule.RunMonthStart(now); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "month-start completed"})
-}
-
 func (s *apiServer) handleScheduleEnd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -465,8 +524,11 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 		Counterparty      string                   `json:"counterparty,omitempty"`
 		PaymentMode       models.PaymentMode       `json:"payment_mode,omitempty"`
 		PaymentInstrument models.PaymentInstrument `json:"payment_instrument,omitempty"`
-		Date              time.Time                `json:"date,omitempty"`
-		Details           string                   `json:"details,omitempty"`
+		// Date is decoded as a plain string (not time.Time) so it accepts
+		// both a full RFC3339 timestamp and a bare "YYYY-MM-DD" from an
+		// HTML date input — see models.ParseFlexibleDate.
+		Date    string `json:"date,omitempty"`
+		Details string `json:"details,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
@@ -474,6 +536,11 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 	}
 	if req.Mechanism != models.SelfTransfer && req.Mechanism != models.InterQuotaLoan {
 		http.Error(w, "mechanism must be Self Transfer or Inter-Quota Loan", http.StatusBadRequest)
+		return
+	}
+	date, err := models.ParseFlexibleDate(req.Date)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid date: %v", err), http.StatusBadRequest)
 		return
 	}
 	funding := domain.FundingOption{
@@ -488,7 +555,7 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 		Counterparty:      req.Counterparty,
 		PaymentMode:       req.PaymentMode,
 		PaymentInstrument: req.PaymentInstrument,
-		Date:              req.Date,
+		Date:              date,
 		Details:           req.Details,
 	}
 	fundingTx, debitTx, err := s.txService.FundAndCreateDebit(funding, debit)
@@ -510,6 +577,41 @@ func (s *apiServer) handleLoanLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *apiServer) handleInterQuotaLoans(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries, err := s.loanService.AllInterQuotaLoans()
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, entries)
+}
+
+func (s *apiServer) handleSettleInterQuotaLoan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		BorrowerQuotaID string  `json:"borrower_quota_id"`
+		LenderQuotaID   string  `json:"lender_quota_id"`
+		Amount          float64 `json:"amount"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	saved, err := s.loanService.SettleInterQuotaLoan(req.BorrowerQuotaID, req.LenderQuotaID, req.Amount, time.Now())
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, saved)
 }
 
 func validateImportData(data storage.Data) error {

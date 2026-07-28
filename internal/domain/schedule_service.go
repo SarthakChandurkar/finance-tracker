@@ -51,7 +51,7 @@ func (s *ScheduleService) RunMonthStart(now time.Time) error {
 		marker := monthStartMarker(now)
 
 		for _, q := range d.Quotas {
-			if q.Archived || !q.IsMonthly() {
+			if !q.IsMonthly() {
 				continue
 			}
 			if alreadyTagged(d, models.Credit, q.ID, marker) {
@@ -120,10 +120,7 @@ func (s *ScheduleService) RunMonthEndSweep(now time.Time) error {
 		marker := eomSweepMarker(now)
 
 		for _, q := range d.Quotas {
-			if q.Archived || !q.IsMonthly() {
-				continue
-			}
-			if alreadyTagged(d, models.SelfTransfer, q.ID, marker) {
+			if !q.IsMonthly() {
 				continue
 			}
 
@@ -132,7 +129,14 @@ func (s *ScheduleService) RunMonthEndSweep(now time.Time) error {
 				return err
 			}
 			if balance <= 0 {
-				continue // nothing left to sweep
+				// Nothing left to sweep — this is what actually makes this
+				// idempotent. (An explicit "already swept this month" marker
+				// check used to live here too, but it over-blocked: it
+				// permanently stopped a quota from being swept again for
+				// the rest of the month even after new money legitimately
+				// arrived in it later. balance<=0 alone already prevents a
+				// redundant no-op re-sweep, without that side effect.)
+				continue
 			}
 
 			dest := q.EOMSweepDestination
@@ -205,4 +209,35 @@ func outstandingLoanBalance(d *storage.Data, borrowerID, lenderID string) float6
 		return 0
 	}
 	return total
+}
+
+// hasOutstandingInterQuotaLoan reports whether quotaID is currently
+// involved — as either borrower or lender — in any Inter-Quota Loan that
+// isn't fully repaid yet. QuotaService.DeleteQuota uses this to refuse
+// deleting a quota with an unsettled loan still attached to it, since
+// deleting it would otherwise silently erase that debt relationship
+// (either side of it) without ever repaying it.
+func hasOutstandingInterQuotaLoan(d *storage.Data, quotaID string) bool {
+	// quotaID as borrower: does it still owe any lender?
+	for _, lenderID := range lenderIDs(d, quotaID) {
+		if outstandingLoanBalance(d, quotaID, lenderID) > 0 {
+			return true
+		}
+	}
+	// quotaID as lender: does any borrower still owe IT?
+	seenBorrower := map[string]bool{}
+	for _, tx := range d.Transactions {
+		if tx.Type != models.InterQuotaLoan {
+			continue
+		}
+		borrowerID := tx.DestinationQuotaID
+		if seenBorrower[borrowerID] {
+			continue
+		}
+		seenBorrower[borrowerID] = true
+		if outstandingLoanBalance(d, borrowerID, quotaID) > 0 {
+			return true
+		}
+	}
+	return false
 }

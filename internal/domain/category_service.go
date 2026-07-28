@@ -17,6 +17,30 @@ func NewCategoryService(store *storage.Store) *CategoryService {
 	return &CategoryService{store: store}
 }
 
+func (s *CategoryService) GetCategoryByID(id string) (models.Category, error) {
+	var found bool
+	var result models.Category // 1. Declare an empty variable outside the inner function
+
+	s.store.View(func(d storage.Data) {
+		for _, cat := range d.Categories {
+			if cat.ID == id {
+				found = true
+				result = cat // 2. Assign the inner data to the outer variable
+				break        // 3. Good practice: stop looping once we find it!
+			}
+		}
+	})
+
+	// 4. Check if we actually found it after the View function finishes
+	if !found {
+		// Return an empty category and a helpful error
+		return models.Category{}, fmt.Errorf("category '%s' not found", id)
+	}
+
+	// 5. Return the saved category and nil (no error)
+	return result, nil
+}
+
 func (s *CategoryService) CreateCategory(name string) (models.Category, error) {
 	if name == "" {
 		return models.Category{}, fmt.Errorf("name is required")

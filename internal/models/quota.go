@@ -39,7 +39,6 @@ type Quota struct {
 	MonthlyAllocation   float64    `json:"monthly_allocation,omitempty"`
 	TargetAmount        float64    `json:"target_amount,omitempty"`
 	EOMSweepDestination string     `json:"eom_sweep_destination,omitempty"`
-	Archived            bool       `json:"archived"`
 }
 
 // NewSavingsQuota builds the one mandatory, non-deletable "Savings" quota
@@ -109,8 +108,9 @@ func (q Quota) Validate() error {
 		return errors.New("scope must be 'Monthly Only' or 'Global Only'")
 	}
 
-	if q.Scope == ScopeMonthlyOnly && q.MonthlyAllocation <= 0 {
-		return errors.New("monthly allocation is required for Monthly Only quotas")
+	// TOMODIFY: The following rules are a bit more nuanced than the A2.2 table, because
+	if q.Scope == ScopeMonthlyOnly && q.MonthlyAllocation < 0 {
+		return errors.New("monthly allocation must be >= 0 for Monthly Only quotas")
 	}
 	if q.Scope == ScopeGlobalOnly && q.MonthlyAllocation != 0 {
 		return errors.New("monthly allocation is not applicable to Global Only quotas")

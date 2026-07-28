@@ -129,9 +129,36 @@ func validateDirectionalRules(d *storage.Data, tx models.Transaction) error {
 			if _, ok := findQuota(d, tx.DestinationQuotaID); !ok {
 				return fmt.Errorf("destination quota not found: %s", tx.DestinationQuotaID)
 			}
+			// Credit/Salary/Loan Received can land in either a Global Only
+			// quota (globalAccumulated) or a Monthly Only quota
+			// (monthlyAvailable) — both balance functions account for
+			// these transaction types, and RunMonthEndSweep carries a
+			// Monthly quota's balance (including these credits) forward
+			// into its linked/EOM destination at month-end, so the money
+			// is never lost either way.
 		}
 		return nil
 	}
+}
+
+// checkLoanSettlementAmount guards the "Settle Loan" flow specifically
+// (identified by the same Category: "Settle" marker the UI's settle panel
+// sends — see ui/app2.js's settleSend handler). Without this, nothing
+// stopped a settlement Debit from exceeding what was actually outstanding
+// for that counterparty: the ledger's OutstandingExternalLoan just floors
+// at zero and silently absorbs the overpayment. This does NOT apply to
+// ordinary Debits that merely happen to have a Counterparty set (e.g.
+// "Amazon", "Zomato") — only to this specific settlement marker — since
+// most spending has nothing to do with an outstanding loan.
+func checkLoanSettlementAmount(d *storage.Data, tx models.Transaction) error {
+	if tx.Type != models.Debit || tx.Category != "Settle" || tx.Counterparty == "" {
+		return nil
+	}
+	outstanding := outstandingForCounterpartyFromData(d, tx.Counterparty)
+	if tx.Amount > outstanding {
+		return fmt.Errorf("cannot settle %.2f for %s — only %.2f is currently outstanding", tx.Amount, tx.Counterparty, outstanding)
+	}
+	return nil
 }
 
 // checkNonNegativeBalance is A1.4's "no balance may go below zero" rule.
@@ -176,7 +203,7 @@ func eligibleFundingOptions(d *storage.Data, targetQuotaID string, amountNeeded 
 
 	var options []FundingOption
 	for _, candidate := range d.Quotas {
-		if candidate.Archived || candidate.ID == targetQuotaID {
+		if candidate.ID == targetQuotaID {
 			continue
 		}
 
@@ -227,6 +254,9 @@ func (s *TransactionService) RecordTransaction(tx models.Transaction) (models.Tr
 		if err := checkNonNegativeBalance(d, tx); err != nil {
 			return err
 		}
+		if err := checkLoanSettlementAmount(d, tx); err != nil {
+			return err
+		}
 		tx.ID = newID()
 		d.Transactions = append(d.Transactions, tx)
 		saved = tx
@@ -274,6 +304,9 @@ func (s *TransactionService) EditTransaction(id string, updated models.Transacti
 			return err
 		}
 		if err := checkNonNegativeBalance(&without, updated); err != nil {
+			return err
+		}
+		if err := checkLoanSettlementAmount(&without, updated); err != nil {
 			return err
 		}
 

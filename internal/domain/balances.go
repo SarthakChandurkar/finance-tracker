@@ -50,6 +50,10 @@ func monthlyAvailable(d *storage.Data, quotaID string, now time.Time) (float64, 
 			if tx.SourceQuotaID == quotaID {
 				available -= tx.Amount
 			}
+		case models.Credit, models.Salary, models.LoanReceived:
+			if tx.DestinationQuotaID == quotaID {
+				available += tx.Amount
+			}
 		case models.SelfTransfer:
 			if tx.DestinationQuotaID == quotaID {
 				available += tx.Amount
@@ -93,6 +97,18 @@ func globalAccumulated(d *storage.Data, quotaID string) (float64, error) {
 			if tx.DestinationQuotaID == quotaID {
 				total += tx.Amount
 			}
+			if tx.SourceQuotaID == quotaID {
+				total -= tx.Amount
+			}
+		case models.InterQuotaLoan:
+			// Per A2.6, a Global Only quota can only ever be the LENDER in
+			// an Inter-Quota Loan (loans only ever lend INTO a Monthly
+			// quota — see validateInterQuotaLoan) — so we only need to
+			// handle the source side here. Lending money out reduces the
+			// lender's own accumulated balance, exactly like a Self
+			// Transfer out would; it's repaid later via an automatic
+			// SelfTransfer (see RunMonthStart), which the SelfTransfer
+			// case above already credits back.
 			if tx.SourceQuotaID == quotaID {
 				total -= tx.Amount
 			}

@@ -9,12 +9,20 @@
 <body>
   <div class="app-shell">
     <header>
-      <h1>Finance Tracker</h1>
+      <div class="header-left">
+        <h1>Finance Tracker</h1>
+        <button id="hamburger-toggle" class="hamburger" type="button" aria-label="Toggle menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
       <nav>
         <button data-view="dashboard" class="active">Dashboard</button>
         <button data-view="transactions">Transactions</button>
         <button data-view="quotas">Quotas</button>
         <button data-view="categories">Categories</button>
+        <button data-view="system">System Actions</button>
       </nav>
     </header>
 
@@ -32,13 +40,19 @@
           </div>
           <div class="card">
             <h3>Loan Ledger</h3>
-              <div id="loan-ledger"></div>
+            <h4>External Loans</h4>
+            <div id="loan-ledger"></div>
+            <h4>Inter-Quota Loans</h4>
+            <div id="interquota-loan-ledger"></div>
           </div>
         </div>
+      </section>
+
+      <section id="system" class="view">
+        <h2>System Actions</h2>
         <div class="panel schedule-panel">
           <h3>System Actions</h3>
           <div class="actions-row">
-            <button id="run-month-start">Run Month Start</button>
             <button id="run-month-end">Run Month End</button>
           </div>
           <div id="system-status" class="status"></div>
@@ -111,21 +125,24 @@
 
         <div class="panel">
           <h3>Recent Transactions</h3>
-          <table id="transaction-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Amount</th>
-                <th>Source</th>
-                <th>Destination</th>
-                <th>Category</th>
-                <th>Counterparty</th>
-                <th>Details</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-wrapper">
+            <table id="transaction-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Amount</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Category</th>
+                  <th>Counterparty</th>
+                  <th>Details</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -146,10 +163,6 @@
               <input id="quota-name" name="name" type="text" required />
             </div>
             <div>
-              <label for="quota-monthly-allocation">Monthly Allocation</label>
-              <input id="quota-monthly-allocation" name="monthly_allocation" type="number" step="0.01" />
-            </div>
-            <div>
               <label for="quota-target-amount">Target Amount</label>
               <input id="quota-target-amount" name="target_amount" type="number" step="0.01" />
             </div>
@@ -167,20 +180,21 @@
 
         <div class="panel">
           <h3>Active Quotas</h3>
-          <table id="quota-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Scope</th>
-                <th>Monthly Allocation</th>
-                <th>Target Amount</th>
-                <th>EOM Destination</th>
-                <th>Archived</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-wrapper">
+            <table id="quota-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Scope</th>
+                  <th>Monthly Allocation</th>
+                  <th>Target Amount</th>
+                  <th>EOM Destination</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -217,38 +231,58 @@
 
         <div class="panel">
           <h3>Categories</h3>
-          <table id="category-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+          <div class="table-wrapper">
+            <table id="category-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
-  <script src="app.js"></script>
-  <div id="loan-settle-panel" class="panel hidden">
-    <h3>Settle Loan</h3>
-    <div>
-      <label>Counterparty</label>
-      <div id="settle-counterparty"></div>
+  <div id="loan-settle-panel" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Settle Loan</h3>
+      <div>
+        <label>Counterparty</label>
+        <div id="settle-counterparty"></div>
+      </div>
+      <div>
+        <label for="settle-amount">Amount</label>
+        <input id="settle-amount" type="number" step="0.01" />
+      </div>
+      <div>
+        <label for="settle-source">Source Quota</label>
+        <select id="settle-source"></select>
+      </div>
+      <div class="actions">
+        <button id="settle-send">Settle</button>
+        <button id="settle-cancel" type="button">Cancel</button>
+      </div>
     </div>
-    <div>
-      <label for="settle-amount">Amount</label>
-      <input id="settle-amount" type="number" step="0.01" />
-    </div>
-    <div>
-      <label for="settle-source">Source Quota</label>
-      <select id="settle-source"></select>
-    </div>
-    <div class="full-width actions">
-      <button id="settle-send">Settle</button>
-      <button id="settle-cancel" type="button">Cancel</button>
+  </div>
+  <div id="interquota-settle-panel" class="modal-overlay hidden">
+    <div class="modal">
+      <h3>Settle Inter-Quota Loan</h3>
+      <div>
+        <label>Loan</label>
+        <div id="interquota-settle-label"></div>
+      </div>
+      <div>
+        <label for="interquota-settle-amount">Amount</label>
+        <input id="interquota-settle-amount" type="number" step="0.01" />
+      </div>
+      <div class="actions">
+        <button id="interquota-settle-send">Settle</button>
+        <button id="interquota-settle-cancel" type="button">Cancel</button>
+      </div>
     </div>
   </div>
   <div id="confirm-modal" class="modal-overlay hidden">
@@ -263,5 +297,27 @@
     </div>
   </div>
   <div id="toasts" aria-live="polite" aria-atomic="true"></div>
+  <script src="app2.js"></script>
+  <script>
+    // Lightweight fallback UI wiring in case app.js fails
+    (function(){
+      const toasts = document.getElementById('toasts');
+      if (!window.showToast) {
+        window.showToast = function(msg, type='success', ms=3000){
+          const el = document.createElement('div'); el.className = 'toast ' + (type||'success'); el.textContent = msg; toasts.appendChild(el);
+          setTimeout(()=>el.remove(), ms);
+        };
+      }
+      const nav = document.querySelectorAll('nav button');
+      function setActive(viewId){
+        document.querySelectorAll('.view').forEach(v=> v.classList.toggle('active', v.id===viewId));
+        nav.forEach(b=> b.classList.toggle('active', b.dataset.view===viewId));
+      }
+      nav.forEach(b=> b.addEventListener('click', ()=> setActive(b.dataset.view)));
+      // ensure today prefilled for tx-date
+      const txDate = document.getElementById('tx-date');
+      if (txDate && !txDate.value) txDate.value = new Date().toISOString().split('T')[0];
+    })();
+  </script>
 </body>
 </html>

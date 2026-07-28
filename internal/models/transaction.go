@@ -1,9 +1,36 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 )
+
+// dateOnlyLayout is what an HTML <input type="date"> sends: just
+// "2026-07-19", with no time-of-day or timezone component at all.
+const dateOnlyLayout = "2006-01-02"
+
+// ParseFlexibleDate accepts either a full RFC3339 timestamp (what our own
+// JSON export / GET responses produce, e.g. "2026-07-19T12:00:00+05:30")
+// or a plain "YYYY-MM-DD" date (what browsers send from a native date
+// picker). Go's encoding/json only understands the former by default,
+// which is why date-only input used to fail with a parse error.
+func ParseFlexibleDate(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(dateOnlyLayout, s); err == nil {
+		return t, nil
+	}
+	return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD or RFC3339)", s)
+}
 
 // TransactionType is one of the 6 kinds of transaction in the app (A1.1).
 // We define it as a named string type (not a plain string) so the Go
@@ -69,6 +96,15 @@ const DefaultCategory = "Miscellaneous"
 // encoding/json package what key name to use when this struct is written
 // to or read from a JSON file. `omitempty` means: if the field is empty
 // (zero value), leave it out of the JSON entirely instead of writing "".
+
+// type Money float64
+
+// func (m Money) MarshalJSON() ([]byte, error) {
+// 	// %.2f forces exactly two decimal places
+// 	formatted := fmt.Sprintf("%.2f", m)
+// 	return []byte(formatted), nil
+// }
+
 type Transaction struct {
 	ID                 string            `json:"id"`
 	Type               TransactionType   `json:"type"`
@@ -81,6 +117,29 @@ type Transaction struct {
 	PaymentInstrument  PaymentInstrument `json:"payment_instrument,omitempty"`
 	Date               time.Time         `json:"date"`
 	Details            string            `json:"details,omitempty"`
+}
+
+// UnmarshalJSON overrides the default decoding so the Date field accepts
+// a plain "YYYY-MM-DD" (from an HTML date input) in addition to the full
+// RFC3339 timestamps Go's time.Time normally requires. Everything else
+// decodes exactly as it would by default — we only intercept "date".
+func (tx *Transaction) UnmarshalJSON(data []byte) error {
+	type Alias Transaction // same fields, but without this UnmarshalJSON method, to avoid infinite recursion
+	aux := struct {
+		Date string `json:"date"`
+		*Alias
+	}{
+		Alias: (*Alias)(tx),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	parsed, err := ParseFlexibleDate(aux.Date)
+	if err != nil {
+		return err
+	}
+	tx.Date = parsed
+	return nil
 }
 
 // BalanceEffect on a Transaction just delegates to its Type. This is the
@@ -127,6 +186,22 @@ func (tx Transaction) Validate() error {
 		if tx.DestinationQuotaID == "" {
 			return errors.New("destination quota is required for Self Transfer / Inter-Quota Loan")
 		}
+	}
+
+	switch tx.Type {
+	case Credit, Salary:
+		if tx.DestinationQuotaID == "" {
+			return errors.New("destination quota is required for Credit and Salary transactions — otherwise the money isn't credited to any quota")
+		}
+	}
+	// Loan Received's Destination Quota is intentionally OPTIONAL: unlike
+	// Credit/Salary, a Loan Received is already tracked without one via its
+	// (required) Counterparty in the Loan Ledger. If a destination is also
+	// given, it's credited there too (see monthlyAvailable/globalAccumulated);
+	// if not, the transaction still exists purely as a ledger entry.
+
+	if tx.Type == LoanReceived && tx.Counterparty == "" {
+		return errors.New("counterparty is required for Loan Received transactions, so it can be tracked in the loan ledger")
 	}
 
 	if tx.Type == Debit && tx.Category == "" {

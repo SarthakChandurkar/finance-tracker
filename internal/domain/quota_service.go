@@ -20,7 +20,7 @@ func NewQuotaService(store *storage.Store) *QuotaService {
 }
 
 // UpdateQuota updates the mutable fields of an existing quota.
-func (s *QuotaService) UpdateQuota(quotaID string, name *string, monthlyAllocation *float64, targetAmount *float64, eomSweepDestination *string) (models.Quota, error) {
+func (s *QuotaService) UpdateQuota(quotaID string, name *string, targetAmount *float64, eomSweepDestination *string) (models.Quota, error) {
 	var updated models.Quota
 	err := s.store.Update(func(d *storage.Data) error {
 		idx := -1
@@ -34,18 +34,12 @@ func (s *QuotaService) UpdateQuota(quotaID string, name *string, monthlyAllocati
 		if idx == -1 {
 			return fmt.Errorf("quota not found: %s", quotaID)
 		}
-		if updated.Archived {
-			return fmt.Errorf("cannot update archived quota: %s", quotaID)
-		}
 
 		if name != nil {
 			updated.Name = *name
 		}
 		switch updated.Scope {
 		case models.ScopeMonthlyOnly:
-			if monthlyAllocation != nil {
-				updated.MonthlyAllocation = *monthlyAllocation
-			}
 			if eomSweepDestination != nil {
 				updated.EOMSweepDestination = *eomSweepDestination
 			}
@@ -84,8 +78,11 @@ func monthlyBreakdownFromData(d *storage.Data, quotaID string, now time.Time) (M
 		return result, fmt.Errorf("quota %s is not a Monthly Only quota", quotaID)
 	}
 
-	result.Allocated = quota.MonthlyAllocation
+	result.QuotaName = quota.Name
 	for _, tx := range d.Transactions {
+
+		// fmt.Println(tx.Date.Year(), now.Year(), tx.Date.Month(), now.Month())
+
 		if tx.Date.Year() != now.Year() || tx.Date.Month() != now.Month() {
 			continue
 		}
@@ -93,6 +90,10 @@ func monthlyBreakdownFromData(d *storage.Data, quotaID string, now time.Time) (M
 		case models.Debit:
 			if tx.SourceQuotaID == quotaID {
 				result.Debited += tx.Amount
+			}
+		case models.Credit, models.Salary, models.LoanReceived:
+			if tx.DestinationQuotaID == quotaID {
+				result.CreditsIn += tx.Amount
 			}
 		case models.SelfTransfer:
 			if tx.DestinationQuotaID == quotaID {
@@ -111,10 +112,10 @@ func monthlyBreakdownFromData(d *storage.Data, quotaID string, now time.Time) (M
 		}
 	}
 
-	result.AvailableBalance = result.Allocated + result.TransfersIn + result.LoansIn -
+	result.AvailableBalance = result.Allocated + result.TransfersIn + result.LoansIn + result.CreditsIn -
 		result.Debited - result.LoansOut - result.TransfersOut
 
-	inflow := result.Allocated + result.TransfersIn + result.LoansIn
+	inflow := result.Allocated + result.TransfersIn + result.LoansIn + result.CreditsIn
 	if inflow > 0 {
 		result.DebitPercent = (result.Debited / inflow) * 100
 	}
@@ -140,6 +141,7 @@ func globalBreakdownFromData(d *storage.Data, quotaID string) (GlobalBreakdown, 
 		return result, fmt.Errorf("quota %s is not a Global Only quota", quotaID)
 	}
 
+	result.QuotaName = quota.Name
 	for _, tx := range d.Transactions {
 		switch tx.Type {
 		case models.Debit:
@@ -154,6 +156,12 @@ func globalBreakdownFromData(d *storage.Data, quotaID string) (GlobalBreakdown, 
 			if tx.DestinationQuotaID == quotaID {
 				result.Accumulated += tx.Amount
 			}
+			if tx.SourceQuotaID == quotaID {
+				result.Accumulated -= tx.Amount
+			}
+		case models.InterQuotaLoan:
+			// See the matching case in balances.go's globalAccumulated for
+			// why only the source (lending) side applies here.
 			if tx.SourceQuotaID == quotaID {
 				result.Accumulated -= tx.Amount
 			}
@@ -172,7 +180,7 @@ func (s *QuotaService) AllMonthlyBreakdowns(now time.Time) ([]MonthlyBreakdown, 
 	var results []MonthlyBreakdown
 	s.store.View(func(d storage.Data) {
 		for _, q := range d.Quotas {
-			if q.Archived || !q.IsMonthly() {
+			if !q.IsMonthly() {
 				continue
 			}
 			breakdown, err := monthlyBreakdownFromData(&d, q.ID, now)
@@ -189,7 +197,7 @@ func (s *QuotaService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
 	var results []GlobalBreakdown
 	s.store.View(func(d storage.Data) {
 		for _, q := range d.Quotas {
-			if q.Archived || !q.IsGlobal() {
+			if !q.IsGlobal() {
 				continue
 			}
 			breakdown, err := globalBreakdownFromData(&d, q.ID)
@@ -202,22 +210,34 @@ func (s *QuotaService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
 	return results, nil
 }
 
-func (s *QuotaService) ArchiveQuota(quotaID string) (models.Quota, error) {
-	var archived models.Quota
+// DeleteQuota permanently removes a quota after sweeping any remaining
+// balance into the mandatory Savings quota. Unlike the old "archive" flag,
+// the quota record is actually removed from storage here — there's no
+// hidden archived copy left behind, and no way to "un-delete" it. If the
+// quota was one half of a linked pair, the other half is unlinked (and,
+// if it was relying on this quota as its EOM Sweep Destination, that
+// falls back to Savings so it doesn't keep pointing at a deleted quota).
+func (s *QuotaService) DeleteQuota(quotaID string) (models.Quota, error) {
+	if quotaID == models.SavingsQuotaID {
+		return models.Quota{}, fmt.Errorf("the mandatory Savings quota cannot be deleted")
+	}
+
+	var deleted models.Quota
 	err := s.store.Update(func(d *storage.Data) error {
 		idx := -1
 		for i, q := range d.Quotas {
 			if q.ID == quotaID {
 				idx = i
-				archived = q
+				deleted = q
 				break
 			}
 		}
 		if idx == -1 {
 			return fmt.Errorf("quota not found: %s", quotaID)
 		}
-		if archived.Archived {
-			return fmt.Errorf("quota already archived: %s", quotaID)
+
+		if hasOutstandingInterQuotaLoan(d, quotaID) {
+			return fmt.Errorf("cannot delete this quota: it has an outstanding Inter-Quota Loan attached to it — settle it first")
 		}
 
 		balance, err := availableBalance(d, quotaID, time.Now())
@@ -232,17 +252,19 @@ func (s *QuotaService) ArchiveQuota(quotaID string) (models.Quota, error) {
 				SourceQuotaID:      quotaID,
 				DestinationQuotaID: models.SavingsQuotaID,
 				Date:               time.Now(),
-				Details:            "system:archive-transfer",
+				Details:            "system:quota-deletion-transfer",
 			})
 		}
 
-		archived.Archived = true
-		d.Quotas[idx] = archived
+		d.Quotas = append(d.Quotas[:idx], d.Quotas[idx+1:]...)
 
-		if archived.LinkedQuotaID != "" {
+		if deleted.LinkedQuotaID != "" {
 			for j, other := range d.Quotas {
-				if other.ID == archived.LinkedQuotaID {
+				if other.ID == deleted.LinkedQuotaID {
 					other.LinkedQuotaID = ""
+					if other.EOMSweepDestination == quotaID {
+						other.EOMSweepDestination = models.SavingsQuotaID
+					}
 					d.Quotas[j] = other
 					break
 				}
@@ -250,7 +272,7 @@ func (s *QuotaService) ArchiveQuota(quotaID string) (models.Quota, error) {
 		}
 		return nil
 	})
-	return archived, err
+	return deleted, err
 }
 
 // CreateQuota implements the three creation modes from A2.2. For "Both",
@@ -261,7 +283,7 @@ func (s *QuotaService) ArchiveQuota(quotaID string) (models.Quota, error) {
 // It returns a Go SLICE ([]models.Quota) because "Both" mode produces two
 // records but the other two modes produce one — a slice lets the caller
 // handle all three cases the same way (loop over however many came back).
-func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, monthlyAllocation, targetAmount float64, eomSweepDestination string) ([]models.Quota, error) {
+func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, targetAmount float64, eomSweepDestination string) ([]models.Quota, error) {
 	switch mode {
 
 	case models.CreateBoth:
@@ -269,11 +291,10 @@ func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, monthl
 		globalID := newID()
 
 		monthly := models.Quota{
-			ID:                monthlyID,
-			Name:              name,
-			Scope:             models.ScopeMonthlyOnly,
-			LinkedQuotaID:     globalID,
-			MonthlyAllocation: monthlyAllocation,
+			ID:            monthlyID,
+			Name:          name,
+			Scope:         models.ScopeMonthlyOnly,
+			LinkedQuotaID: globalID,
 		}
 		global := models.Quota{
 			ID:            globalID,
@@ -305,11 +326,11 @@ func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, monthl
 		return []models.Quota{monthly, global}, nil
 
 	case models.CreateMonthlyOnly:
+
 		q := models.Quota{
 			ID:                  newID(),
 			Name:                name,
 			Scope:               models.ScopeMonthlyOnly,
-			MonthlyAllocation:   monthlyAllocation,
 			EOMSweepDestination: eomSweepDestination,
 		}
 		// No LinkedQuotaID here, so ApplyDefaults falls back to "Savings"
@@ -358,12 +379,14 @@ func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, monthl
 // list, filtered to the given month, every time it's requested.
 type MonthlyBreakdown struct {
 	QuotaID          string  `json:"quota_id"`
+	QuotaName        string  `json:"quota_name,omitempty"`
 	Allocated        float64 `json:"allocated"`
 	Debited          float64 `json:"debited"`
 	TransfersIn      float64 `json:"transfers_in"`
 	TransfersOut     float64 `json:"transfers_out"`
 	LoansIn          float64 `json:"loans_in"`
 	LoansOut         float64 `json:"loans_out"`
+	CreditsIn        float64 `json:"credits_in"`
 	AvailableBalance float64 `json:"available_balance"`
 	DebitPercent     float64 `json:"debit_percent"`
 }
@@ -393,7 +416,7 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 		if !found {
 			return
 		}
-		result.Allocated = quota.MonthlyAllocation
+		result.QuotaName = quota.Name
 
 		for _, tx := range d.Transactions {
 			if tx.Date.Year() != now.Year() || tx.Date.Month() != now.Month() {
@@ -403,6 +426,10 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 			case models.Debit:
 				if tx.SourceQuotaID == quotaID {
 					result.Debited += tx.Amount
+				}
+			case models.Credit, models.Salary, models.LoanReceived:
+				if tx.DestinationQuotaID == quotaID {
+					result.CreditsIn += tx.Amount
 				}
 			case models.SelfTransfer:
 				if tx.DestinationQuotaID == quotaID {
@@ -429,10 +456,10 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 		return result, fmt.Errorf("quota %s is not a Monthly Only quota", quotaID)
 	}
 
-	result.AvailableBalance = result.Allocated + result.TransfersIn + result.LoansIn -
+	result.AvailableBalance = result.Allocated + result.TransfersIn + result.LoansIn + result.CreditsIn -
 		result.Debited - result.LoansOut - result.TransfersOut
 
-	inflow := result.Allocated + result.TransfersIn + result.LoansIn
+	inflow := result.Allocated + result.TransfersIn + result.LoansIn + result.CreditsIn
 	if inflow > 0 {
 		result.DebitPercent = (result.Debited / inflow) * 100
 	}
@@ -443,6 +470,7 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 // GlobalBreakdown is the computed A2.4 view for one Global Only quota.
 type GlobalBreakdown struct {
 	QuotaID         string  `json:"quota_id"`
+	QuotaName       string  `json:"quota_name,omitempty"`
 	Accumulated     float64 `json:"accumulated"`
 	HasGoal         bool    `json:"has_goal"`
 	TargetAmount    float64 `json:"target_amount"`
@@ -488,11 +516,17 @@ func (s *QuotaService) GlobalBreakdown(quotaID string) (GlobalBreakdown, error) 
 				if tx.SourceQuotaID == quotaID {
 					result.Accumulated -= tx.Amount
 				}
-				// Inter-Quota Loans are intentionally not handled here:
-				// per A2.6 they only ever lend INTO Monthly entities, so
-				// a Global Only quota can never be their destination, and
-				// the lending side is accounted for on the Monthly quota's
-				// own MonthlyBreakdown instead.
+			case models.InterQuotaLoan:
+				// Per A2.6, a Global Only quota can only ever be the LENDER
+				// in an Inter-Quota Loan (loans only ever lend INTO a
+				// Monthly quota — see validateInterQuotaLoan), so only the
+				// source (lending) side applies here. Lending money out
+				// reduces the lender's own accumulated balance; it's repaid
+				// later via an automatic SelfTransfer (see RunMonthStart),
+				// which the SelfTransfer case above already credits back.
+				if tx.SourceQuotaID == quotaID {
+					result.Accumulated -= tx.Amount
+				}
 			}
 		}
 	})
@@ -500,6 +534,7 @@ func (s *QuotaService) GlobalBreakdown(quotaID string) (GlobalBreakdown, error) 
 	if !found {
 		return result, fmt.Errorf("quota not found: %s", quotaID)
 	}
+	result.QuotaName = quota.Name
 	if !quota.IsGlobal() {
 		return result, fmt.Errorf("quota %s is not a Global Only quota", quotaID)
 	}
