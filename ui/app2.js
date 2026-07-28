@@ -362,6 +362,7 @@ function populateSelects() {
 function resetTransactionForm() {
   if (!transactionForm) return;
   transactionForm.reset();
+  if (txDate) txDate.value = formatDate(new Date());
   editingTransactionId = null;
   transactionForm.querySelector('#transaction-form-heading').textContent = 'Create Transaction';
   txSubmit.textContent = 'Save Transaction';

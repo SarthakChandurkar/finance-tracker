@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -12,110 +11,217 @@ import (
 	"financetracker/internal/models"
 )
 
-// Data is the on-disk (now: on-Redis) shape (A5): the entire database is
-// just three lists. This mirrors the "Single Schema Principle" — nothing
-// here duplicates or pre-aggregates the transactions; every derived number
-// (balances, totals, etc.) gets computed on the fly by the domain layer,
-// not stored here.
+// Data is still the shape the rest of the app (domain layer, handlers)
+// works with in memory — nothing about View()/Update() changes from the
+// caller's perspective. What changes is how Load()/saveLocked() get this
+// shape into and out of Redis: instead of one JSON blob, each entity gets
+// its own key, indexed by a Redis Set per collection.
 type Data struct {
-	Transactions  []models.Transaction `json:"transactions"`
-	Quotas        []models.Quota       `json:"quotas"`
-	Categories    []models.Category    `json:"categories"`
-	LastMonthYear string               `json:"last_month_year,omitempty"` // tracks the last month-end sweep we did, so we don't double-sweep
+	Transactions []models.Transaction `json:"transactions"`
+	Quotas       []models.Quota       `json:"quotas"`
+	Categories   []models.Category    `json:"categories"`
 }
 
-// Store wraps the in-memory Data with a mutex (so concurrent HTTP requests
-// don't corrupt it) and knows how to load/save that Data as a single JSON
-// blob under one Redis key. This keeps the exact same public interface
-// (Load / View / Update) the file-based version had, so nothing in the
-// domain layer or main.go's handlers needs to change — only how Data gets
-// persisted underneath.
+const (
+	keyTxPrefix       = "tx:"
+	keyQuotaPrefix    = "quota:"
+	keyCategoryPrefix = "category:"
+
+	idxTransactions = "idx:transactions"
+	idxQuotas       = "idx:quotas"
+	idxCategories   = "idx:categories"
+)
+
+// Store wraps the in-memory Data with a mutex, same as before. Load() and
+// Update() still hand back/take a single Data value — only the Redis
+// layout underneath is schema-wise now.
 type Store struct {
 	mu   sync.RWMutex
 	rdb  *redis.Client
-	key  string
 	ctx  context.Context
 	data Data
 }
 
-// NewStore creates a Store pointed at the given Redis client and key. It
-// does NOT load any data yet — call Load() explicitly right after, so
-// startup errors are visible to whoever calls it (main.go), rather than
-// hidden inside a constructor.
-func NewStore(rdb *redis.Client, key string) *Store {
+// NewStore creates a Store around the given Redis client. Unlike the
+// single-blob version, there's no "key" argument any more — the keys are
+// fixed per-entity-type prefixes/indexes, defined above.
+func NewStore(rdb *redis.Client) *Store {
 	return &Store{
 		rdb: rdb,
-		key: key,
 		ctx: context.Background(),
 	}
 }
 
-// Load reads the JSON blob from Redis into memory. If the key doesn't
-// exist yet (first run), it seeds the store with the two mandatory
-// records the requirements doc calls for — the "Savings" quota (A2.2)
-// and the "Settled" category (A4.2) — and writes that out as the
-// starting value.
+// Load reads every entity from Redis into memory. If neither the quotas
+// nor categories index exists yet, this is treated as a first run: it
+// seeds the mandatory Savings quota (A2.2) and Settled category (A4.2)
+// and writes them out.
 func (s *Store) Load() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	val, err := s.rdb.Get(s.ctx, s.key).Result()
-	if errors.Is(err, redis.Nil) {
+	exists, err := s.rdb.Exists(s.ctx, idxQuotas, idxCategories).Result()
+	if err != nil {
+		return fmt.Errorf("checking redis for existing data: %w", err)
+	}
+	if exists == 0 {
 		s.data = Data{
 			Quotas:     []models.Quota{models.NewSavingsQuota()},
 			Categories: []models.Category{models.NewSettledCategory()},
 		}
 		return s.saveLocked()
 	}
+
+	txs, err := loadCollection[models.Transaction](s.ctx, s.rdb, idxTransactions, keyTxPrefix)
 	if err != nil {
-		return fmt.Errorf("reading data from redis: %w", err)
+		return fmt.Errorf("loading transactions: %w", err)
+	}
+	quotas, err := loadCollection[models.Quota](s.ctx, s.rdb, idxQuotas, keyQuotaPrefix)
+	if err != nil {
+		return fmt.Errorf("loading quotas: %w", err)
+	}
+	categories, err := loadCollection[models.Category](s.ctx, s.rdb, idxCategories, keyCategoryPrefix)
+	if err != nil {
+		return fmt.Errorf("loading categories: %w", err)
 	}
 
-	var d Data
-	if err := json.Unmarshal([]byte(val), &d); err != nil {
-		return fmt.Errorf("parsing data from redis: %w", err)
+	s.data = Data{
+		Transactions: txs,
+		Quotas:       quotas,
+		Categories:   categories,
 	}
-	s.data = d
 	return nil
 }
 
-// saveLocked performs the actual write. It assumes the caller already
-// holds the lock (the "Locked" suffix is a common Go naming convention for
-// an internal helper that skips its own locking because the caller did it).
-//
-// A single SET is inherently atomic in Redis — there's no "half-written"
-// state another reader could observe, so we don't need the temp-file +
-// rename dance the file-based version used.
-func (s *Store) saveLocked() error {
-	bytes, err := json.Marshal(s.data)
+// loadCollection fetches every ID in idxKey's Set, then MGETs the actual
+// entity JSON for each one and unmarshals it into T. Generic so it works
+// identically for Transaction, Quota, and Category.
+func loadCollection[T any](ctx context.Context, rdb *redis.Client, idxKey, prefix string) ([]T, error) {
+	ids, err := rdb.SMembers(ctx, idxKey).Result()
 	if err != nil {
-		return fmt.Errorf("encoding data: %w", err)
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return nil, nil
 	}
 
-	if err := s.rdb.Set(s.ctx, s.key, bytes, 0).Err(); err != nil {
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = prefix + id
+	}
+
+	vals, err := rdb.MGet(ctx, keys...).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]T, 0, len(vals))
+	for _, v := range vals {
+		if v == nil {
+			// Index pointed at a key that no longer exists (e.g. a crash
+			// between deleting the entity and updating the index). Skip
+			// it rather than fail the whole load.
+			continue
+		}
+		str, ok := v.(string)
+		if !ok {
+			continue
+		}
+		var item T
+		if err := json.Unmarshal([]byte(str), &item); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, nil
+}
+
+// saveLocked writes the current in-memory Data back to Redis, one entity
+// per key, and keeps each idx:* Set in sync — including removing keys for
+// entities that were deleted from the in-memory slice since the last save.
+// The whole thing runs inside a single Redis transaction (TxPipeline) so
+// a concurrent reader never sees a half-updated state.
+func (s *Store) saveLocked() error {
+	pipe := s.rdb.TxPipeline()
+
+	if err := syncCollection(s.ctx, s.rdb, pipe, idxTransactions, keyTxPrefix,
+		s.data.Transactions, func(tx models.Transaction) string { return tx.ID }); err != nil {
+		return fmt.Errorf("syncing transactions: %w", err)
+	}
+	if err := syncCollection(s.ctx, s.rdb, pipe, idxQuotas, keyQuotaPrefix,
+		s.data.Quotas, func(q models.Quota) string { return q.ID }); err != nil {
+		return fmt.Errorf("syncing quotas: %w", err)
+	}
+	if err := syncCollection(s.ctx, s.rdb, pipe, idxCategories, keyCategoryPrefix,
+		s.data.Categories, func(c models.Category) string { return c.ID }); err != nil {
+		return fmt.Errorf("syncing categories: %w", err)
+	}
+
+	if _, err := pipe.Exec(s.ctx); err != nil {
 		return fmt.Errorf("writing data to redis: %w", err)
 	}
 	return nil
 }
 
-// View gives read-only access to the current data. Pass in a function that
-// reads whatever it needs — View holds a read lock for the duration, so
-// multiple Views can run at once, but they'll wait for any in-progress
-// Update to finish first.
+// syncCollection diffs the entity IDs currently in Redis's idx:* Set
+// against the IDs present in `items`, then queues (on pipe): a SET for
+// every current item, a DEL for every entity key that was removed, and a
+// full replace of the idx:* Set so it matches exactly.
+func syncCollection[T any](
+	ctx context.Context,
+	rdb *redis.Client,
+	pipe redis.Pipeliner,
+	idxKey, prefix string,
+	items []T,
+	idOf func(T) string,
+) error {
+	oldIDs, err := rdb.SMembers(ctx, idxKey).Result()
+	if err != nil {
+		return err
+	}
+	oldSet := make(map[string]bool, len(oldIDs))
+	for _, id := range oldIDs {
+		oldSet[id] = true
+	}
+
+	newIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		id := idOf(item)
+		newIDs = append(newIDs, id)
+		delete(oldSet, id) // whatever's left in oldSet after this loop = removed entities
+
+		b, err := json.Marshal(item)
+		if err != nil {
+			return err
+		}
+		pipe.Set(ctx, prefix+id, b, 0)
+	}
+
+	// Delete keys for entities no longer present.
+	for removedID := range oldSet {
+		pipe.Del(ctx, prefix+removedID)
+	}
+
+	// Replace the index wholesale so it exactly matches newIDs.
+	pipe.Del(ctx, idxKey)
+	if len(newIDs) > 0 {
+		members := make([]interface{}, len(newIDs))
+		for i, id := range newIDs {
+			members[i] = id
+		}
+		pipe.SAdd(ctx, idxKey, members...)
+	}
+	return nil
+}
+
+// View gives read-only access to the current in-memory data.
 func (s *Store) View(fn func(Data)) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	fn(s.data)
 }
 
-// Update gives exclusive read+write access, then persists the result to
-// Redis before returning. This should be the ONLY way the rest of the app
-// changes stored data — it guarantees every change is immediately saved,
-// so nothing lives in memory-only for long.
-//
-// fn takes a *Data (pointer) so it can actually modify the store's fields.
-// If fn returns an error, we skip saving — this lets callers abort a
-// change (e.g. a failed validation) without writing anything to Redis.
+// Update gives exclusive access, applies fn, then persists to Redis.
 func (s *Store) Update(fn func(*Data) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

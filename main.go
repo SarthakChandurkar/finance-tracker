@@ -66,12 +66,8 @@ type apiServer struct {
 // ... (your routes function stays exactly the same) ...
 
 func main() {
-	redisKey := os.Getenv("REDIS_DATA_KEY")
-	if redisKey == "" {
-		redisKey = "financetracker:data"
-	}
 
-	store := storage.NewStore(rdb, redisKey)
+	store := storage.NewStore(rdb)
 	if err := store.Load(); err != nil {
 		log.Fatalf("failed to load data from redis: %v", err)
 	}
@@ -110,9 +106,23 @@ func main() {
 	log.Fatal(srv.ListenAndServe())
 }
 
-func (s *apiServer) monthCatchUpMiddleware(next http.Handler) http.Handler {
+// reloadMiddleware re-reads the in-memory store from Redis before every
+// request — including GETs. Previously, Store.Load() only ran once at
+// process startup, so the in-memory cache never picked up changes made
+// to Redis outside the running server (e.g. editing keys directly) until
+// the next process restart. Update() (used by POST/PUT/DELETE handlers)
+// mutates and persists that same in-memory copy, which is why writes
+// made through the app appeared to "refresh" things — they were pushing
+// the in-memory state forward, not actually pulling from Redis.
+//
+// This does add a Redis round trip to every request, but for this app's
+// scale that's a non-issue, and correctness (always seeing current DB
+// state) matters more here than shaving that latency.
+func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		catchUpIfMonthChanged(s.store, s.schedule, time.Now())
+		if err := s.store.Load(); err != nil {
+			log.Printf("reloadMiddleware: failed to reload store from redis: %v", err)
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -139,7 +149,7 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("/api/funding-options", s.handleFundingOptions)
 	mux.Handle("/", http.FileServer(http.Dir("ui")))
 
-	return s.monthCatchUpMiddleware(mux)
+	return s.reloadMiddleware(mux)
 }
 
 func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
