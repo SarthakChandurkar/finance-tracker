@@ -8,31 +8,27 @@ import (
 	"financetracker/internal/storage"
 )
 
-// QuotaService groups every operation related to quotas. It holds a
-// reference to the Store so it can read/write data, but it never touches
-// the JSON file directly — that's storage's job, not domain's.
-type QuotaService struct {
+type WalletService struct {
 	store *storage.Store
 }
 
-func NewQuotaService(store *storage.Store) *QuotaService {
-	return &QuotaService{store: store}
+func NewWalletService(store *storage.Store) *WalletService {
+	return &WalletService{store: store}
 }
 
-// UpdateQuota updates the mutable fields of an existing quota.
-func (s *QuotaService) UpdateQuota(quotaID string, name *string, targetAmount *float64, eomSweepDestination *string) (models.Quota, error) {
-	var updated models.Quota
+func (s *WalletService) UpdateWallet(walletID string, name *string, targetAmount *float64, eomSweepDestination *string) (models.Wallet, error) {
+	var updated models.Wallet
 	err := s.store.Update(func(d *storage.Data) error {
 		idx := -1
-		for i, q := range d.Quotas {
-			if q.ID == quotaID {
+		for i, q := range d.Wallets {
+			if q.ID == walletID {
 				idx = i
 				updated = q
 				break
 			}
 		}
 		if idx == -1 {
-			return fmt.Errorf("quota not found: %s", quotaID)
+			return fmt.Errorf("wallet not found: %s", walletID)
 		}
 
 		if name != nil {
@@ -48,65 +44,62 @@ func (s *QuotaService) UpdateQuota(quotaID string, name *string, targetAmount *f
 				updated.TargetAmount = *targetAmount
 			}
 		}
-		updated.ApplyDefaults(models.SavingsQuotaID)
+		updated.ApplyDefaults(models.SavingsWalletID)
 		if err := updated.Validate(); err != nil {
 			return err
 		}
-		d.Quotas[idx] = updated
+		d.Wallets[idx] = updated
 		return nil
 	})
 	return updated, err
 }
 
-// ArchiveQuota archives the quota and moves any remaining balance into Savings.
-func monthlyBreakdownFromData(d *storage.Data, quotaID string, now time.Time) (MonthlyBreakdown, error) {
-	result := MonthlyBreakdown{QuotaID: quotaID}
+func monthlyBreakdownFromData(d *storage.Data, walletID string, now time.Time) (MonthlyBreakdown, error) {
+	result := MonthlyBreakdown{WalletID: walletID}
 
-	var quota models.Quota
+	var wallet models.Wallet
 	var found bool
-	for _, q := range d.Quotas {
-		if q.ID == quotaID {
-			quota = q
+	for _, q := range d.Wallets {
+		if q.ID == walletID {
+			wallet = q
 			found = true
 			break
 		}
 	}
 	if !found {
-		return result, fmt.Errorf("quota not found: %s", quotaID)
+		return result, fmt.Errorf("wallet not found: %s", walletID)
 	}
-	if !quota.IsMonthly() {
-		return result, fmt.Errorf("quota %s is not a Monthly Only quota", quotaID)
+	if !wallet.IsMonthly() {
+		return result, fmt.Errorf("wallet %s is not a Monthly Only wallet", walletID)
 	}
 
-	result.QuotaName = quota.Name
+	result.WalletName = wallet.Name
 	for _, tx := range d.Transactions {
-
-		// fmt.Println(tx.Date.Year(), now.Year(), tx.Date.Month(), now.Month())
 
 		if tx.Date.Year() != now.Year() || tx.Date.Month() != now.Month() {
 			continue
 		}
 		switch tx.Type {
 		case models.Debit:
-			if tx.SourceQuotaID == quotaID {
+			if tx.SourceWalletID == walletID {
 				result.Debited += tx.Amount
 			}
 		case models.Credit, models.Salary, models.LoanReceived:
-			if tx.DestinationQuotaID == quotaID {
+			if tx.DestinationWalletID == walletID {
 				result.CreditsIn += tx.Amount
 			}
 		case models.SelfTransfer:
-			if tx.DestinationQuotaID == quotaID {
+			if tx.DestinationWalletID == walletID {
 				result.TransfersIn += tx.Amount
 			}
-			if tx.SourceQuotaID == quotaID {
+			if tx.SourceWalletID == walletID {
 				result.TransfersOut += tx.Amount
 			}
-		case models.InterQuotaLoan:
-			if tx.DestinationQuotaID == quotaID {
+		case models.InterWalletLoan:
+			if tx.DestinationWalletID == walletID {
 				result.LoansIn += tx.Amount
 			}
-			if tx.SourceQuotaID == quotaID {
+			if tx.SourceWalletID == walletID {
 				result.LoansOut += tx.Amount
 			}
 		}
@@ -122,64 +115,63 @@ func monthlyBreakdownFromData(d *storage.Data, quotaID string, now time.Time) (M
 	return result, nil
 }
 
-func globalBreakdownFromData(d *storage.Data, quotaID string) (GlobalBreakdown, error) {
-	result := GlobalBreakdown{QuotaID: quotaID}
+func globalBreakdownFromData(d *storage.Data, walletID string) (GlobalBreakdown, error) {
+	result := GlobalBreakdown{WalletID: walletID}
 
-	var quota models.Quota
+	var wallet models.Wallet
 	var found bool
-	for _, q := range d.Quotas {
-		if q.ID == quotaID {
-			quota = q
+	for _, q := range d.Wallets {
+		if q.ID == walletID {
+			wallet = q
 			found = true
 			break
 		}
 	}
 	if !found {
-		return result, fmt.Errorf("quota not found: %s", quotaID)
+		return result, fmt.Errorf("wallet not found: %s", walletID)
 	}
-	if !quota.IsGlobal() {
-		return result, fmt.Errorf("quota %s is not a Global Only quota", quotaID)
+	if !wallet.IsGlobal() {
+		return result, fmt.Errorf("wallet %s is not a Global Only wallet", walletID)
 	}
 
-	result.QuotaName = quota.Name
+	result.WalletName = wallet.Name
 	for _, tx := range d.Transactions {
 		switch tx.Type {
 		case models.Debit:
-			if tx.SourceQuotaID == quotaID {
+			if tx.SourceWalletID == walletID {
 				result.Accumulated -= tx.Amount
 			}
 		case models.Credit, models.Salary, models.LoanReceived:
-			if tx.DestinationQuotaID == quotaID {
+			if tx.DestinationWalletID == walletID {
 				result.Accumulated += tx.Amount
 			}
 		case models.SelfTransfer:
-			if tx.DestinationQuotaID == quotaID {
+			if tx.DestinationWalletID == walletID {
 				result.Accumulated += tx.Amount
 			}
-			if tx.SourceQuotaID == quotaID {
+			if tx.SourceWalletID == walletID {
 				result.Accumulated -= tx.Amount
 			}
-		case models.InterQuotaLoan:
-			// See the matching case in balances.go's globalAccumulated for
-			// why only the source (lending) side applies here.
-			if tx.SourceQuotaID == quotaID {
+		case models.InterWalletLoan:
+
+			if tx.SourceWalletID == walletID {
 				result.Accumulated -= tx.Amount
 			}
 		}
 	}
 
-	result.HasGoal = quota.HasGoal()
-	result.TargetAmount = quota.TargetAmount
+	result.HasGoal = wallet.HasGoal()
+	result.TargetAmount = wallet.TargetAmount
 	if result.HasGoal {
-		result.PercentComplete = quota.GoalProgress(result.Accumulated)
+		result.PercentComplete = wallet.GoalProgress(result.Accumulated)
 	}
 	return result, nil
 }
 
-func (s *QuotaService) AllMonthlyBreakdowns(now time.Time) ([]MonthlyBreakdown, error) {
+func (s *WalletService) AllMonthlyBreakdowns(now time.Time) ([]MonthlyBreakdown, error) {
 	var results []MonthlyBreakdown
 	s.store.View(func(d storage.Data) {
-		for _, q := range d.Quotas {
+		for _, q := range d.Wallets {
 			if !q.IsMonthly() {
 				continue
 			}
@@ -193,10 +185,10 @@ func (s *QuotaService) AllMonthlyBreakdowns(now time.Time) ([]MonthlyBreakdown, 
 	return results, nil
 }
 
-func (s *QuotaService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
+func (s *WalletService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
 	var results []GlobalBreakdown
 	s.store.View(func(d storage.Data) {
-		for _, q := range d.Quotas {
+		for _, q := range d.Wallets {
 			if !q.IsGlobal() {
 				continue
 			}
@@ -210,62 +202,55 @@ func (s *QuotaService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
 	return results, nil
 }
 
-// DeleteQuota permanently removes a quota after sweeping any remaining
-// balance into the mandatory Savings quota. Unlike the old "archive" flag,
-// the quota record is actually removed from storage here — there's no
-// hidden archived copy left behind, and no way to "un-delete" it. If the
-// quota was one half of a linked pair, the other half is unlinked (and,
-// if it was relying on this quota as its EOM Sweep Destination, that
-// falls back to Savings so it doesn't keep pointing at a deleted quota).
-func (s *QuotaService) DeleteQuota(quotaID string) (models.Quota, error) {
-	if quotaID == models.SavingsQuotaID {
-		return models.Quota{}, fmt.Errorf("the mandatory Savings quota cannot be deleted")
+func (s *WalletService) DeleteWallet(walletID string) (models.Wallet, error) {
+	if walletID == models.SavingsWalletID {
+		return models.Wallet{}, fmt.Errorf("the mandatory Savings wallet cannot be deleted")
 	}
 
-	var deleted models.Quota
+	var deleted models.Wallet
 	err := s.store.Update(func(d *storage.Data) error {
 		idx := -1
-		for i, q := range d.Quotas {
-			if q.ID == quotaID {
+		for i, q := range d.Wallets {
+			if q.ID == walletID {
 				idx = i
 				deleted = q
 				break
 			}
 		}
 		if idx == -1 {
-			return fmt.Errorf("quota not found: %s", quotaID)
+			return fmt.Errorf("wallet not found: %s", walletID)
 		}
 
-		if hasOutstandingInterQuotaLoan(d, quotaID) {
-			return fmt.Errorf("cannot delete this quota: it has an outstanding Inter-Quota Loan attached to it — settle it first")
+		if hasOutstandingInterWalletLoan(d, walletID) {
+			return fmt.Errorf("cannot delete this wallet: it has an outstanding Inter-Wallet Loan attached to it — settle it first")
 		}
 
-		balance, err := availableBalance(d, quotaID, time.Now())
+		balance, err := availableBalance(d, walletID, time.Now())
 		if err != nil {
 			return err
 		}
 		if balance > 0 {
 			d.Transactions = append(d.Transactions, models.Transaction{
-				ID:                 newID(),
-				Type:               models.SelfTransfer,
-				Amount:             balance,
-				SourceQuotaID:      quotaID,
-				DestinationQuotaID: models.SavingsQuotaID,
-				Date:               time.Now(),
-				Details:            "system:quota-deletion-transfer",
+				ID:                  newID(),
+				Type:                models.SelfTransfer,
+				Amount:              balance,
+				SourceWalletID:      walletID,
+				DestinationWalletID: models.SavingsWalletID,
+				Date:                time.Now(),
+				Details:             "system:wallet-deletion-transfer",
 			})
 		}
 
-		d.Quotas = append(d.Quotas[:idx], d.Quotas[idx+1:]...)
+		d.Wallets = append(d.Wallets[:idx], d.Wallets[idx+1:]...)
 
-		if deleted.LinkedQuotaID != "" {
-			for j, other := range d.Quotas {
-				if other.ID == deleted.LinkedQuotaID {
-					other.LinkedQuotaID = ""
-					if other.EOMSweepDestination == quotaID {
-						other.EOMSweepDestination = models.SavingsQuotaID
+		if deleted.LinkedWalletID != "" {
+			for j, other := range d.Wallets {
+				if other.ID == deleted.LinkedWalletID {
+					other.LinkedWalletID = ""
+					if other.EOMSweepDestination == walletID {
+						other.EOMSweepDestination = models.SavingsWalletID
 					}
-					d.Quotas[j] = other
+					d.Wallets[j] = other
 					break
 				}
 			}
@@ -275,39 +260,28 @@ func (s *QuotaService) DeleteQuota(quotaID string) (models.Quota, error) {
 	return deleted, err
 }
 
-// CreateQuota implements the three creation modes from A2.2. For "Both",
-// it builds two linked entities in one call, per the "Entity Model Note"
-// at the top of A2: a quota is always single-scope, and "Both" just means
-// "make two of them and link them."
-//
-// It returns a Go SLICE ([]models.Quota) because "Both" mode produces two
-// records but the other two modes produce one — a slice lets the caller
-// handle all three cases the same way (loop over however many came back).
-func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, targetAmount float64, eomSweepDestination string) ([]models.Quota, error) {
+func (s *WalletService) CreateWallet(mode models.CreationMode, name string, targetAmount float64, eomSweepDestination string) ([]models.Wallet, error) {
 	switch mode {
 
 	case models.CreateBoth:
 		monthlyID := newID()
 		globalID := newID()
 
-		monthly := models.Quota{
-			ID:            monthlyID,
-			Name:          name,
-			Scope:         models.ScopeMonthlyOnly,
-			LinkedQuotaID: globalID,
+		monthly := models.Wallet{
+			ID:             monthlyID,
+			Name:           name,
+			Scope:          models.ScopeMonthlyOnly,
+			LinkedWalletID: globalID,
 		}
-		global := models.Quota{
-			ID:            globalID,
-			Name:          name,
-			Scope:         models.ScopeGlobalOnly,
-			LinkedQuotaID: monthlyID,
-			TargetAmount:  targetAmount,
+		global := models.Wallet{
+			ID:             globalID,
+			Name:           name,
+			Scope:          models.ScopeGlobalOnly,
+			LinkedWalletID: monthlyID,
+			TargetAmount:   targetAmount,
 		}
-		// LinkedQuotaID is already set on `monthly`, so ApplyDefaults will
-		// set its EOMSweepDestination to globalID automatically (A2.2:
-		// "Monthly entity's EOM Sweep Destination auto-defaults to its
-		// linked Global entity").
-		monthly.ApplyDefaults(models.SavingsQuotaID)
+
+		monthly.ApplyDefaults(models.SavingsWalletID)
 
 		if err := monthly.Validate(); err != nil {
 			return nil, fmt.Errorf("monthly half: %w", err)
@@ -317,41 +291,39 @@ func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, target
 		}
 
 		err := s.store.Update(func(d *storage.Data) error {
-			d.Quotas = append(d.Quotas, monthly, global)
+			d.Wallets = append(d.Wallets, monthly, global)
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		}
-		return []models.Quota{monthly, global}, nil
+		return []models.Wallet{monthly, global}, nil
 
 	case models.CreateMonthlyOnly:
 
-		q := models.Quota{
+		q := models.Wallet{
 			ID:                  newID(),
 			Name:                name,
 			Scope:               models.ScopeMonthlyOnly,
 			EOMSweepDestination: eomSweepDestination,
 		}
-		// No LinkedQuotaID here, so ApplyDefaults falls back to "Savings"
-		// if the caller didn't set an explicit EOMSweepDestination — per
-		// A2.2's "Monthly Only" creation mode rule.
-		q.ApplyDefaults(models.SavingsQuotaID)
+
+		q.ApplyDefaults(models.SavingsWalletID)
 
 		if err := q.Validate(); err != nil {
 			return nil, err
 		}
 		err := s.store.Update(func(d *storage.Data) error {
-			d.Quotas = append(d.Quotas, q)
+			d.Wallets = append(d.Wallets, q)
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		}
-		return []models.Quota{q}, nil
+		return []models.Wallet{q}, nil
 
 	case models.CreateGlobalOnly:
-		q := models.Quota{
+		q := models.Wallet{
 			ID:           newID(),
 			Name:         name,
 			Scope:        models.ScopeGlobalOnly,
@@ -361,25 +333,22 @@ func (s *QuotaService) CreateQuota(mode models.CreationMode, name string, target
 			return nil, err
 		}
 		err := s.store.Update(func(d *storage.Data) error {
-			d.Quotas = append(d.Quotas, q)
+			d.Wallets = append(d.Wallets, q)
 			return nil
 		})
 		if err != nil {
 			return nil, err
 		}
-		return []models.Quota{q}, nil
+		return []models.Wallet{q}, nil
 
 	default:
 		return nil, fmt.Errorf("unknown creation mode: %q", mode)
 	}
 }
 
-// MonthlyBreakdown is the computed A2.3 view for one Monthly Only quota.
-// Nothing here is stored — it's entirely derived from the transaction
-// list, filtered to the given month, every time it's requested.
 type MonthlyBreakdown struct {
-	QuotaID          string  `json:"quota_id"`
-	QuotaName        string  `json:"quota_name,omitempty"`
+	WalletID         string  `json:"wallet_id"`
+	WalletName       string  `json:"wallet_name,omitempty"`
 	Allocated        float64 `json:"allocated"`
 	Debited          float64 `json:"debited"`
 	TransfersIn      float64 `json:"transfers_in"`
@@ -391,24 +360,16 @@ type MonthlyBreakdown struct {
 	DebitPercent     float64 `json:"debit_percent"`
 }
 
-// MonthlyBreakdown computes A2.3's formula:
-//
-//	Available Balance = Allocated + Self Transfers In + Loans In
-//	                     − Debited − Loans Out − Self Transfers Out
-//
-// `now` is passed in (rather than calling time.Now() internally) so this
-// function is easy to test — a test can pass any month it likes and get a
-// predictable answer.
-func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyBreakdown, error) {
-	result := MonthlyBreakdown{QuotaID: quotaID}
+func (s *WalletService) MonthlyBreakdown(walletID string, now time.Time) (MonthlyBreakdown, error) {
+	result := MonthlyBreakdown{WalletID: walletID}
 
-	var quota models.Quota
+	var wallet models.Wallet
 	var found bool
 
 	s.store.View(func(d storage.Data) {
-		for _, q := range d.Quotas {
-			if q.ID == quotaID {
-				quota = q
+		for _, q := range d.Wallets {
+			if q.ID == walletID {
+				wallet = q
 				found = true
 				break
 			}
@@ -416,7 +377,7 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 		if !found {
 			return
 		}
-		result.QuotaName = quota.Name
+		result.WalletName = wallet.Name
 
 		for _, tx := range d.Transactions {
 			if tx.Date.Year() != now.Year() || tx.Date.Month() != now.Month() {
@@ -424,25 +385,25 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 			}
 			switch tx.Type {
 			case models.Debit:
-				if tx.SourceQuotaID == quotaID {
+				if tx.SourceWalletID == walletID {
 					result.Debited += tx.Amount
 				}
 			case models.Credit, models.Salary, models.LoanReceived:
-				if tx.DestinationQuotaID == quotaID {
+				if tx.DestinationWalletID == walletID {
 					result.CreditsIn += tx.Amount
 				}
 			case models.SelfTransfer:
-				if tx.DestinationQuotaID == quotaID {
+				if tx.DestinationWalletID == walletID {
 					result.TransfersIn += tx.Amount
 				}
-				if tx.SourceQuotaID == quotaID {
+				if tx.SourceWalletID == walletID {
 					result.TransfersOut += tx.Amount
 				}
-			case models.InterQuotaLoan:
-				if tx.DestinationQuotaID == quotaID {
+			case models.InterWalletLoan:
+				if tx.DestinationWalletID == walletID {
 					result.LoansIn += tx.Amount
 				}
-				if tx.SourceQuotaID == quotaID {
+				if tx.SourceWalletID == walletID {
 					result.LoansOut += tx.Amount
 				}
 			}
@@ -450,10 +411,10 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 	})
 
 	if !found {
-		return result, fmt.Errorf("quota not found: %s", quotaID)
+		return result, fmt.Errorf("wallet not found: %s", walletID)
 	}
-	if !quota.IsMonthly() {
-		return result, fmt.Errorf("quota %s is not a Monthly Only quota", quotaID)
+	if !wallet.IsMonthly() {
+		return result, fmt.Errorf("wallet %s is not a Monthly Only wallet", walletID)
 	}
 
 	result.AvailableBalance = result.Allocated + result.TransfersIn + result.LoansIn + result.CreditsIn -
@@ -467,30 +428,25 @@ func (s *QuotaService) MonthlyBreakdown(quotaID string, now time.Time) (MonthlyB
 	return result, nil
 }
 
-// GlobalBreakdown is the computed A2.4 view for one Global Only quota.
 type GlobalBreakdown struct {
-	QuotaID         string  `json:"quota_id"`
-	QuotaName       string  `json:"quota_name,omitempty"`
+	WalletID        string  `json:"wallet_id"`
+	WalletName      string  `json:"wallet_name,omitempty"`
 	Accumulated     float64 `json:"accumulated"`
 	HasGoal         bool    `json:"has_goal"`
 	TargetAmount    float64 `json:"target_amount"`
 	PercentComplete float64 `json:"percent_complete"`
 }
 
-// GlobalBreakdown sums EVERY transaction ever recorded against this quota
-// (no month filter — "no date restriction: all history" is the whole
-// point of a Global entity per A2.4), then folds in the Goal math from
-// A2.4/Quota.GoalProgress.
-func (s *QuotaService) GlobalBreakdown(quotaID string) (GlobalBreakdown, error) {
-	result := GlobalBreakdown{QuotaID: quotaID}
+func (s *WalletService) GlobalBreakdown(walletID string) (GlobalBreakdown, error) {
+	result := GlobalBreakdown{WalletID: walletID}
 
-	var quota models.Quota
+	var wallet models.Wallet
 	var found bool
 
 	s.store.View(func(d storage.Data) {
-		for _, q := range d.Quotas {
-			if q.ID == quotaID {
-				quota = q
+		for _, q := range d.Wallets {
+			if q.ID == walletID {
+				wallet = q
 				found = true
 				break
 			}
@@ -502,29 +458,23 @@ func (s *QuotaService) GlobalBreakdown(quotaID string) (GlobalBreakdown, error) 
 		for _, tx := range d.Transactions {
 			switch tx.Type {
 			case models.Debit:
-				if tx.SourceQuotaID == quotaID {
+				if tx.SourceWalletID == walletID {
 					result.Accumulated -= tx.Amount
 				}
 			case models.Credit, models.Salary, models.LoanReceived:
-				if tx.DestinationQuotaID == quotaID {
+				if tx.DestinationWalletID == walletID {
 					result.Accumulated += tx.Amount
 				}
 			case models.SelfTransfer:
-				if tx.DestinationQuotaID == quotaID {
+				if tx.DestinationWalletID == walletID {
 					result.Accumulated += tx.Amount
 				}
-				if tx.SourceQuotaID == quotaID {
+				if tx.SourceWalletID == walletID {
 					result.Accumulated -= tx.Amount
 				}
-			case models.InterQuotaLoan:
-				// Per A2.6, a Global Only quota can only ever be the LENDER
-				// in an Inter-Quota Loan (loans only ever lend INTO a
-				// Monthly quota — see validateInterQuotaLoan), so only the
-				// source (lending) side applies here. Lending money out
-				// reduces the lender's own accumulated balance; it's repaid
-				// later via an automatic SelfTransfer (see RunMonthStart),
-				// which the SelfTransfer case above already credits back.
-				if tx.SourceQuotaID == quotaID {
+			case models.InterWalletLoan:
+
+				if tx.SourceWalletID == walletID {
 					result.Accumulated -= tx.Amount
 				}
 			}
@@ -532,17 +482,17 @@ func (s *QuotaService) GlobalBreakdown(quotaID string) (GlobalBreakdown, error) 
 	})
 
 	if !found {
-		return result, fmt.Errorf("quota not found: %s", quotaID)
+		return result, fmt.Errorf("wallet not found: %s", walletID)
 	}
-	result.QuotaName = quota.Name
-	if !quota.IsGlobal() {
-		return result, fmt.Errorf("quota %s is not a Global Only quota", quotaID)
+	result.WalletName = wallet.Name
+	if !wallet.IsGlobal() {
+		return result, fmt.Errorf("wallet %s is not a Global Only wallet", walletID)
 	}
 
-	result.HasGoal = quota.HasGoal()
-	result.TargetAmount = quota.TargetAmount
+	result.HasGoal = wallet.HasGoal()
+	result.TargetAmount = wallet.TargetAmount
 	if result.HasGoal {
-		result.PercentComplete = quota.GoalProgress(result.Accumulated)
+		result.PercentComplete = wallet.GoalProgress(result.Accumulated)
 	}
 
 	return result, nil

@@ -14,22 +14,22 @@ const txDate = document.getElementById('tx-date');
 const transactionForm = document.getElementById('transaction-form');
 const txSubmit = document.getElementById('tx-submit');
 const txCancel = document.getElementById('tx-cancel');
-const quotaMode = document.getElementById('quota-mode');
-const quotaForm = document.getElementById('quota-form');
-const quotaSubmit = document.getElementById('quota-submit');
-const quotaCancel = document.getElementById('quota-cancel');
+const walletMode = document.getElementById('wallet-mode');
+const walletForm = document.getElementById('wallet-form');
+const walletSubmit = document.getElementById('wallet-submit');
+const walletCancel = document.getElementById('wallet-cancel');
 const categoryForm = document.getElementById('category-form');
 const recategorizeForm = document.getElementById('recategorize-form');
 const sourceCategorySelect = document.getElementById('source-category');
 const destCategorySelect = document.getElementById('dest-category');
-const quotaModeNote = document.getElementById('quota-mode-note');
-const quotaTableBody = document.querySelector('#quota-table tbody');
+const walletModeNote = document.getElementById('wallet-mode-note');
+const walletTableBody = document.querySelector('#wallet-table tbody');
 const transactionTableBody = document.querySelector('#transaction-table tbody');
 const categoryTableBody = document.querySelector('#category-table tbody');
-const quotaBreakdowns = document.getElementById('quota-breakdowns');
+const walletBreakdowns = document.getElementById('wallet-breakdowns');
 const categoryTotals = document.getElementById('category-totals');
 const loanLedger = document.getElementById('loan-ledger');
-const interQuotaLoanLedger = document.getElementById('interquota-loan-ledger');
+const interWalletLoanLedger = document.getElementById('interwallet-loan-ledger');
 const fundingPanel = document.getElementById('funding-panel');
 const fundingMessage = document.getElementById('funding-message');
 const fundingOptionsList = document.getElementById('funding-options-list');
@@ -40,13 +40,19 @@ const settleAmount = document.getElementById('settle-amount');
 const settleSource = document.getElementById('settle-source');
 const settleSend = document.getElementById('settle-send');
 const settleCancel = document.getElementById('settle-cancel');
-const interQuotaSettlePanel = document.getElementById('interquota-settle-panel');
-const interQuotaSettleLabel = document.getElementById('interquota-settle-label');
-const interQuotaSettleAmount = document.getElementById('interquota-settle-amount');
-const interQuotaSettleSend = document.getElementById('interquota-settle-send');
-const interQuotaSettleCancel = document.getElementById('interquota-settle-cancel');
+const interWalletSettlePanel = document.getElementById('interwallet-settle-panel');
+const interWalletSettleLabel = document.getElementById('interwallet-settle-label');
+const interWalletSettleAmount = document.getElementById('interwallet-settle-amount');
+const interWalletSettleSend = document.getElementById('interwallet-settle-send');
+const interWalletSettleCancel = document.getElementById('interwallet-settle-cancel');
 const systemStatus = document.getElementById('system-status');
 const monthEndButton = document.getElementById('run-month-end');
+const taskForm = document.getElementById('task-form');
+const taskTitleInput = document.getElementById('task-title');
+const taskDueInput = document.getElementById('task-due');
+const taskList = document.getElementById('task-list');
+const deleteAllTasksBtn = document.getElementById('delete-all-tasks');
+const todayTasksEl = document.getElementById('today-tasks');
 const confirmModal = document.getElementById('confirm-modal');
 const confirmTitle = document.getElementById('confirm-title');
 const confirmMessage = document.getElementById('confirm-message');
@@ -54,17 +60,19 @@ const confirmDetails = document.getElementById('confirm-details');
 const confirmYes = document.getElementById('confirm-yes');
 const confirmNo = document.getElementById('confirm-no');
 
-const transactionTypes = ['Debit', 'Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Quota Loan'];
-const quotaModeOptions = ['Both', 'Monthly Only', 'Global Only'];
+const transactionTypes = ['Debit', 'Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Wallet Loan'];
+const walletModeOptions = ['Both', 'Monthly Only', 'Global Only'];
 const paymentModes = ['Self', 'On Behalf of Other'];
 const paymentInstruments = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Cheque'];
 
-let currentQuotas = [];
+let currentWallets = [];
 let currentCategories = [];
 let currentTransactions = [];
+let currentTasks = [];
 let pendingTransaction = null;
-let editingQuotaId = null;
+let editingWalletId = null;
 let editingTransactionId = null;
+let editingTaskId = null;
 let confirmCallback = null;
 
 function showToast(message, type = 'success', ms = 4000) {
@@ -84,27 +92,45 @@ function setFormError(id, msg) {
 }
 
 async function fetchJSON(url, options = {}) {
+  // 1. Explicitly tell the server we want JSON, not the HTML template
+  options.headers = {
+    'Accept': 'application/json',
+    ...(options.headers || {})
+  };
+
   const res = await fetch(url, options);
   const text = await res.text();
   let body = null;
-  try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
+  
+  try { 
+    body = text ? JSON.parse(text) : null; 
+  } catch (e) { 
+    body = text; 
+  }
+  
   if (!res.ok) {
     const err = new Error((body && body.error) || text || res.statusText);
     err.status = res.status;
     err.body = body;
     throw err;
   }
+  
   return body;
 }
 
 function normalizeFormNumbers(payload, fields) {
   fields.forEach((field) => {
     if (!Object.prototype.hasOwnProperty.call(payload, field)) return;
+    
     const value = payload[field];
+    
+    // Instead of deleting the key, we set it to null so the backend 
+    // knows to clear out the existing data in the database.
     if (value === '' || value === null || value === undefined) {
-      delete payload[field];
+      payload[field] = null; 
       return;
     }
+    
     const num = Number(value);
     payload[field] = Number.isNaN(num) ? value : num;
   });
@@ -118,7 +144,10 @@ function setActiveView(viewId) {
   }
 }
 
-navButtons.forEach((button) => button.addEventListener('click', () => setActiveView(button.dataset.view)));
+navButtons.forEach((button) => button.addEventListener('click', () => {
+  setActiveView(button.dataset.view);
+  refreshData();
+}));
 
 hamburgerToggle && hamburgerToggle.addEventListener('click', () => {
   if (navMenu) {
@@ -142,28 +171,60 @@ function formatDate(dateString) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Used any time task/user-entered text gets dropped into innerHTML, so a
+// task titled e.g. "<script>" can't break out of its <span>.
+function escapeHTML(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
+}
+
+// The backend sends due_date as a full RFC3339 timestamp (e.g.
+// "2026-07-30T00:00:00Z"), since Task.Date is a Go time.Time with no
+// custom JSON marshaling. <input type="date"> and our own "is this
+// today?" check both need just the "YYYY-MM-DD" part, so this pulls that
+// out — and still works unchanged if the backend ever starts sending a
+// plain date string instead.
+function toDateOnly(dateString) {
+  if (!dateString) return '';
+  return String(dateString).slice(0, 10);
+}
+
 function updateTransactionFormFields() {
   if (!txType) return;
   const type = txType.value;
-  const categoryField = document.querySelector('label[for="tx-category"]').parentElement;
-  const destinationField = document.querySelector('label[for="tx-destination"]').parentElement;
-  const counterpartyField = document.querySelector('label[for="tx-counterparty"]').parentElement;
-  categoryField.style.display = type === 'Debit' ? '' : 'none';
-  const destinationRequiredTypes = ['Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Quota Loan'];
-  destinationField.style.display = destinationRequiredTypes.includes(type) ? '' : 'none';
-  // Salary is a paycheck, never loan activity — hide Counterparty so it
-  // can't accidentally get tagged with a loan counterparty and show up
-  // in the Loan Ledger.
-  counterpartyField.style.display = type === 'Salary' ? 'none' : '';
+  
+  const categoryLabel = document.querySelector('label[for="tx-category"]');
+  const destinationLabel = document.querySelector('label[for="tx-destination"]');
+  const counterpartyLabel = document.querySelector('label[for="tx-counterparty"]');
+
+  if (categoryLabel?.parentElement) {
+    categoryLabel.parentElement.style.display = type === 'Debit' ? '' : 'none';
+  }
+  
+  if (destinationLabel?.parentElement) {
+    const destinationRequiredTypes = ['Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Wallet Loan'];
+    destinationLabel.parentElement.style.display = destinationRequiredTypes.includes(type) ? '' : 'none';
+  }
+  
+  if (counterpartyLabel?.parentElement) {
+    // Salary is a paycheck, never loan activity — hide Counterparty so it
+    // can't accidentally get tagged with a loan counterparty and show up
+    // in the Loan Ledger.
+    counterpartyLabel.parentElement.style.display = type === 'Salary' ? 'none' : '';
+  }
+
   populateDestinationOptions(type);
 }
 
-// Credit/Salary/Loan Received can land in either a Global Only quota or a
-// Monthly Only quota — both are tracked correctly, so no scope filtering
-// is needed here; every active quota is a valid destination.
+
+
+// Credit/Salary/Loan Received can land in either a Global Only wallet or a
+// Monthly Only wallet — both are tracked correctly, so no scope filtering
+// is needed here; every active wallet is a valid destination.
 function populateDestinationOptions(type) {
   if (!txDestination) return;
-  const pool = currentQuotas;
+  const pool = currentWallets;
   const previousValue = txDestination.value;
   buildSelectOptions(txDestination, pool.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
   if (pool.some((q) => q.id === previousValue)) {
@@ -171,11 +232,11 @@ function populateDestinationOptions(type) {
   }
 }
 
-function updateQuotaFormFields() {
-  if (!quotaMode) return;
-  const mode = quotaMode.value;
-  const targetField = document.getElementById('quota-target-amount').parentElement;
-  const eomField = document.getElementById('quota-eom-destination').parentElement;
+function updateWalletFormFields() {
+  if (!walletMode) return;
+  const mode = walletMode.value;
+  const targetField = document.getElementById('wallet-target-amount').parentElement;
+  const eomField = document.getElementById('wallet-eom-destination').parentElement;
   if (mode === 'Monthly Only') {
     eomField.style.display = '';
     targetField.style.display = 'none';
@@ -188,13 +249,13 @@ function updateQuotaFormFields() {
   }
 }
 
-// Quota deletion is permanent (the record is removed from storage), so an
+// Wallet deletion is permanent (the record is removed from storage), so an
 // older transaction or an EOM Sweep Destination can end up pointing at an
-// ID that no longer resolves to any quota. Rather than leaking that raw
+// ID that no longer resolves to any wallet. Rather than leaking that raw
 // internal ID into the UI, show a clear "DELETED" marker.
-function quotaLabelHTML(quotaId) {
-  if (!quotaId) return '';
-  const q = findQuota(quotaId);
+function walletLabelHTML(walletId) {
+  if (!walletId) return '';
+  const q = findWallet(walletId);
   if (q) return q.name;
   return '<span style="color:#dc2626;font-weight:600;">DELETED</span>';
 }
@@ -206,11 +267,11 @@ function renderTransactions(transactions) {
       <td>${t.date || ''}</td>
       <td>${t.type || ''}</td>
       <td>${typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || ''}</td>
-      <td>${quotaLabelHTML(t.source_quota_id)}</td>
-      <td>${quotaLabelHTML(t.destination_quota_id)}</td>
-      <td>${t.category || ''}</td>
-      <td>${t.counterparty || ''}</td>
-      <td>${t.details || ''}</td>
+      <td>${walletLabelHTML(t.source_wallet_id)}</td>
+      <td>${walletLabelHTML(t.destination_wallet_id)}</td>
+      <td>${escapeHTML(t.category || '')}</td>
+      <td>${escapeHTML(t.counterparty || '')}</td>
+      <td>${escapeHTML(t.details || '')}</td>
       <td class="actions-cell">
         <button class="edit-transaction" data-id="${t.id}">Edit</button>
         <button class="delete-transaction" data-id="${t.id}">Delete</button>
@@ -219,18 +280,19 @@ function renderTransactions(transactions) {
   `).join('');
 }
 
-function renderQuotas(quotas) {
-  if (!quotaTableBody) return;
-  quotaTableBody.innerHTML = (quotas || []).map((q) => `
+
+function renderWallets(wallets) {
+  if (!walletTableBody) return;
+  walletTableBody.innerHTML = (wallets || []).map((q) => `
     <tr>
       <td>${q.name}</td>
       <td>${q.scope || ''}</td>
       <td></td>
       <td>${q.target_amount || ''}</td>
-      <td>${quotaLabelHTML(q.eom_sweep_destination)}</td>
+      <td>${walletLabelHTML(q.eom_sweep_destination)}</td>
       <td>
-        <button class="edit-quota" data-id="${q.id}">Edit</button>
-        ${q.id === 'savings' ? '' : `<button class="delete-quota" data-id="${q.id}">Delete</button>`}
+        <button class="edit-wallet" data-id="${q.id}">Edit</button>
+        ${q.id === 'savings' ? '' : `<button class="delete-wallet" data-id="${q.id}">Delete</button>`}
       </td>
     </tr>
   `).join('');
@@ -258,30 +320,30 @@ function renderLoanLedger(entries) {
   `).join('');
 }
 
-function renderInterQuotaLoanLedger(entries) {
-  if (!interQuotaLoanLedger) return;
-  interQuotaLoanLedger.innerHTML = (entries || []).map((entry) => `
+function renderInterWalletLoanLedger(entries) {
+  if (!interWalletLoanLedger) return;
+  interWalletLoanLedger.innerHTML = (entries || []).map((entry) => `
     <div class="loan-entry">
-      <span>${entry.lender_quota_name} &rarr; ${entry.borrower_quota_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
-      <button class="settle-interquota-loan"
-        data-lender-id="${entry.lender_quota_id}"
-        data-lender-name="${entry.lender_quota_name}"
-        data-borrower-id="${entry.borrower_quota_id}"
-        data-borrower-name="${entry.borrower_quota_name}">Settle</button>
+      <span>${entry.lender_wallet_name} &rarr; ${entry.borrower_wallet_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
+      <button class="settle-interwallet-loan"
+        data-lender-id="${entry.lender_wallet_id}"
+        data-lender-name="${entry.lender_wallet_name}"
+        data-borrower-id="${entry.borrower_wallet_id}"
+        data-borrower-name="${entry.borrower_wallet_name}">Settle</button>
     </div>
   `).join('');
 }
 
-function renderDashboard(quotaData, categoryData) {
-  if (quotaBreakdowns && quotaData) {
-    quotaBreakdowns.innerHTML = `
+function renderDashboard(walletData, categoryData) {
+  if (walletBreakdowns && walletData) {
+    walletBreakdowns.innerHTML = `
       <div>
-        <h4>Monthly Quotas</h4>
-        <ul>${(quotaData.monthly || []).map((q) => `<li>${q.quota_name || q.quota_id}: spent ${Number(q.debited).toFixed(2)}, available ${Number(q.available_balance).toFixed(2)}</li>`).join('')}</ul>
+        <h4>Monthly Wallets</h4>
+        <ul>${(walletData.monthly || []).map((q) => `<li>${q.wallet_name || q.wallet_id}: spent ${Number(q.debited).toFixed(2)}, available ${Number(q.available_balance).toFixed(2)}</li>`).join('')}</ul>
       </div>
       <div>
-        <h4>Global Quotas</h4>
-        <ul>${(quotaData.global || []).map((q) => `<li>${q.quota_name || q.quota_id}: accumulated ${Number(q.accumulated).toFixed(2)}</li>`).join('')}</ul>
+        <h4>Global Wallets</h4>
+        <ul>${(walletData.global || []).map((q) => `<li>${q.wallet_name || q.wallet_id}: accumulated ${Number(q.accumulated).toFixed(2)}</li>`).join('')}</ul>
       </div>
     `;
   }
@@ -299,6 +361,105 @@ function renderDashboard(quotaData, categoryData) {
   }
 }
 
+// A task row renders in one of two states: normal (checkbox + title +
+// pencil), or editing (title/date inputs + save/cancel), tracked via the
+// single `editingTaskId` — same one-at-a-time pattern as
+// editingWalletId/editingTransactionId above.
+function renderTasks(tasks) {
+  if (!taskList) return;
+  if (!tasks || !tasks.length) {
+    taskList.innerHTML = '<li class="task-empty">No tasks yet — add one above.</li>';
+    return;
+  }
+  taskList.innerHTML = tasks.map((t) => {
+    if (String(editingTaskId) === String(t.id)) {
+      return `
+        <li class="task-item editing" data-id="${t.id}">
+          <div class="task-body">
+            <input class="task-title-edit" type="text" value="${escapeHTML(t.title || '')}" data-id="${t.id}" />
+            <input class="task-due-edit" type="date" value="${toDateOnly(t.due_date)}" data-id="${t.id}" />
+          </div>
+          <div class="task-edit-actions">
+            <button class="task-save-btn" data-id="${t.id}" type="button" aria-label="Save task">&#10003;</button>
+            <button class="task-cancel-btn" data-id="${t.id}" type="button" aria-label="Cancel edit">&#10005;</button>
+          </div>
+        </li>
+      `;
+    }
+    return `
+      <li class="task-item" data-id="${t.id}">
+        <label class="task-check">
+          <input type="checkbox" class="task-delete-checkbox" data-id="${t.id}" />
+          <span class="checkmark"></span>
+        </label>
+        <div class="task-body">
+          <span class="task-title">${escapeHTML(t.title || '')}</span>
+          ${t.due_date ? `<span class="task-due">${toDateOnly(t.due_date)}</span>` : ''}
+        </div>
+        <button class="task-edit-btn" data-id="${t.id}" type="button" aria-label="Edit task">&#9998;</button>
+      </li>
+    `;
+  }).join('');
+}
+
+// Dashboard card: today's still-pending tasks. A task counts as "pending"
+// simply by existing (deletion is real removal via DELETE, there's no
+// separate done/not-done flag) — so this is just "due today".
+function renderTodayTasks(tasks) {
+  if (!todayTasksEl) return;
+  const today = formatDate(new Date());
+  const todays = (tasks || []).filter((t) => toDateOnly(t.due_date) === today);
+  if (!todays.length) {
+    todayTasksEl.innerHTML = '<p class="note">No tasks due today.</p>';
+    return;
+  }
+  todayTasksEl.innerHTML = `<ul class="today-task-list">${todays.map((t) => `<li>${escapeHTML(t.title || '')}</li>`).join('')}</ul>`;
+}
+
+// Tasks are now relayed through our backend to an external task server
+// (Server B) that isn't stored locally anymore. That server spins down
+// when idle, so the very first request after a while can take up to a
+// minute to come back while it wakes up. tasksLoaded tracks whether
+// we've had at least one successful response since the page loaded, so
+// that wait is only shown once — later refreshes (after adding/editing/
+// deleting a task) don't blank the list out again.
+let tasksLoaded = false;
+
+function showTasksConnecting() {
+  if (taskList) {
+    taskList.innerHTML = '<li class="task-empty task-connecting">Connecting to task server… this can take up to a minute if it has been idle.</li>';
+  }
+  if (todayTasksEl) {
+    todayTasksEl.innerHTML = '<p class="note task-connecting">Connecting to task server…</p>';
+  }
+}
+
+async function refreshTasks() {
+  if (!tasksLoaded) {
+    showTasksConnecting();
+  }
+  try {
+    const rawTasks = await fetchJSON('/api/tasks');
+    
+    // THE FIX: Loop through the tasks and map MongoDB's '_id' to standard 'id'.
+    // This instantly fixes your checkboxes, edit buttons, and delete requests!
+    currentTasks = (rawTasks || []).map(t => {
+      t.id = t._id || t.id;
+      return t;
+    });
+    
+    tasksLoaded = true;
+    renderTasks(currentTasks);
+    renderTodayTasks(currentTasks);
+  } catch (err) {
+    showToast(err.message || 'Failed to load tasks', 'error');
+    if (!tasksLoaded) {
+      if (taskList) taskList.innerHTML = '<li class="task-empty">Couldn\u2019t reach the task server. Try again shortly.</li>';
+      if (todayTasksEl) todayTasksEl.innerHTML = '<p class="note">Couldn\u2019t reach the task server.</p>';
+    }
+  }
+}
+
 function showFundingOptions(errorBody) {
   if (!fundingPanel) return;
   const options = (errorBody && errorBody.options) || [];
@@ -309,7 +470,7 @@ function showFundingOptions(errorBody) {
     fundingMessage.textContent = errorBody.message || 'Choose a funding option to remediate the shortfall.';
     fundingOptionsList.innerHTML = options.map((opt) => `
       <li>
-        <button class="fund-option" data-mechanism="${opt.mechanism}" data-source-quota-id="${opt.source_quota_id}">${opt.label || opt.mechanism}</button>
+        <button class="fund-option" data-mechanism="${opt.mechanism}" data-source-wallet-id="${opt.source_wallet_id}">${opt.label || opt.mechanism}</button>
       </li>
     `).join('');
   }
@@ -354,7 +515,7 @@ function setSystemStatus(message, isError = false) {
 
 function populateSelects() {
   buildSelectOptions(txType, transactionTypes, false);
-  buildSelectOptions(quotaMode, quotaModeOptions, false);
+  buildSelectOptions(walletMode, walletModeOptions, false);
   buildSelectOptions(txPaymentMode, paymentModes, false);
   buildSelectOptions(txPaymentInstrument, paymentInstruments, false);
 }
@@ -370,22 +531,22 @@ function resetTransactionForm() {
   updateTransactionFormFields();
 }
 
-function resetQuotaForm() {
-  if (!quotaForm) return;
-  quotaForm.reset();
-  editingQuotaId = null;
-  quotaMode.disabled = false;
-  quotaModeNote.textContent = '';
-  quotaForm.querySelector('#quota-form-heading').textContent = 'Create Quota';
-  quotaSubmit.textContent = 'Create Quota';
-  setFormError('quota-error', '');
-  updateQuotaFormFields();
+function resetWalletForm() {
+  if (!walletForm) return;
+  walletForm.reset();
+  editingWalletId = null;
+  walletMode.disabled = false;
+  walletModeNote.textContent = '';
+  walletForm.querySelector('#wallet-form-heading').textContent = 'Create Wallet';
+  walletSubmit.textContent = 'Create Wallet';
+  setFormError('wallet-error', '');
+  updateWalletFormFields();
 }
 
 function openLoanSettlePanel(counterparty) {
   if (!loanSettlePanel) return;
   settleCounterparty.textContent = counterparty;
-  settleSource.innerHTML = currentQuotas.map((q) => `<option value="${q.id}">${q.name} (${q.scope})</option>`).join('');
+  settleSource.innerHTML = currentWallets.map((q) => `<option value="${q.id}">${q.name} (${q.scope})</option>`).join('');
   settleAmount.value = '';
   loanSettlePanel.classList.remove('hidden');
 }
@@ -395,20 +556,20 @@ function hideLoanSettlePanel() {
   loanSettlePanel.classList.add('hidden');
 }
 
-let pendingInterQuotaSettlement = null;
+let pendingInterWalletSettlement = null;
 
-function openInterQuotaSettlePanel(lenderId, lenderName, borrowerId, borrowerName) {
-  if (!interQuotaSettlePanel) return;
-  pendingInterQuotaSettlement = { lenderId, borrowerId };
-  interQuotaSettleLabel.textContent = `${borrowerName} owes ${lenderName}`;
-  interQuotaSettleAmount.value = '';
-  interQuotaSettlePanel.classList.remove('hidden');
+function openInterWalletSettlePanel(lenderId, lenderName, borrowerId, borrowerName) {
+  if (!interWalletSettlePanel) return;
+  pendingInterWalletSettlement = { lenderId, borrowerId };
+  interWalletSettleLabel.textContent = `${borrowerName} owes ${lenderName}`;
+  interWalletSettleAmount.value = '';
+  interWalletSettlePanel.classList.remove('hidden');
 }
 
-function hideInterQuotaSettlePanel() {
-  if (!interQuotaSettlePanel) return;
-  pendingInterQuotaSettlement = null;
-  interQuotaSettlePanel.classList.add('hidden');
+function hideInterWalletSettlePanel() {
+  if (!interWalletSettlePanel) return;
+  pendingInterWalletSettlement = null;
+  interWalletSettlePanel.classList.add('hidden');
 }
 
 fundingOptionsList && fundingOptionsList.addEventListener('click', (event) => {
@@ -420,8 +581,8 @@ fundingOptionsList && fundingOptionsList.addEventListener('click', (event) => {
   }
   const payload = {
     mechanism: button.dataset.mechanism,
-    source_quota_id: button.dataset.sourceQuotaId,
-    target_quota_id: pendingTransaction.source_quota_id,
+    source_wallet_id: button.dataset.sourceWalletId,
+    target_wallet_id: pendingTransaction.source_wallet_id,
     amount: pendingTransaction.amount,
     category: pendingTransaction.category,
     counterparty: pendingTransaction.counterparty,
@@ -455,11 +616,11 @@ settleSend && settleSend.addEventListener('click', () => {
   const source = settleSource.value;
   const counterparty = settleCounterparty.textContent;
   if (!amount || amount <= 0) return showToast('Enter a positive amount', 'error');
-  if (!source) return showToast('Select a source quota', 'error');
+  if (!source) return showToast('Select a source wallet', 'error');
   const payload = {
     type: 'Debit',
     amount,
-    source_quota_id: source,
+    source_wallet_id: source,
     category: 'Settle',
     counterparty,
     date: new Date().toISOString().split('T')[0],
@@ -485,25 +646,25 @@ monthEndButton && monthEndButton.addEventListener('click', () => {
     .catch((err) => setSystemStatus(`Month-end failed: ${err.message}`, true));
 });
 
-interQuotaSettleCancel && interQuotaSettleCancel.addEventListener('click', hideInterQuotaSettlePanel);
-interQuotaSettleSend && interQuotaSettleSend.addEventListener('click', () => {
-  const amount = parseFloat(interQuotaSettleAmount.value);
+interWalletSettleCancel && interWalletSettleCancel.addEventListener('click', hideInterWalletSettlePanel);
+interWalletSettleSend && interWalletSettleSend.addEventListener('click', () => {
+  const amount = parseFloat(interWalletSettleAmount.value);
   if (!amount || amount <= 0) return showToast('Enter a positive amount', 'error');
-  if (!pendingInterQuotaSettlement) return showToast('No loan selected to settle', 'error');
+  if (!pendingInterWalletSettlement) return showToast('No loan selected to settle', 'error');
   const payload = {
-    borrower_quota_id: pendingInterQuotaSettlement.borrowerId,
-    lender_quota_id: pendingInterQuotaSettlement.lenderId,
+    borrower_wallet_id: pendingInterWalletSettlement.borrowerId,
+    lender_wallet_id: pendingInterWalletSettlement.lenderId,
     amount,
   };
-  fetchJSON('/api/inter-quota-loans/settle', {
+  fetchJSON('/api/inter-wallet-loans/settle', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   })
     .then(() => {
-      hideInterQuotaSettlePanel();
+      hideInterWalletSettlePanel();
       refreshData();
-      showToast('Inter-Quota Loan settlement recorded', 'success');
+      showToast('Inter-Wallet Loan settlement recorded', 'success');
     })
     .catch((err) => showToast(err.message || 'Failed to settle loan', 'error'));
 });
@@ -518,14 +679,14 @@ document.addEventListener('click', (event) => {
         .catch((err) => showToast(err.message || 'Failed to delete category', 'error'));
     });
   }
-  if (target.classList.contains('edit-quota')) {
-    openEditQuota(target.dataset.id);
+  if (target.classList.contains('edit-wallet')) {
+    openEditWallet(target.dataset.id);
   }
-  if (target.classList.contains('delete-quota')) {
-    openConfirm('Delete quota', 'Delete this quota permanently? Its remaining balance will be transferred to Savings. This cannot be undone.', '', () => {
-      fetchJSON(`/api/quotas/${target.dataset.id}`, { method: 'DELETE' })
-        .then(() => { refreshData(); showToast('Quota deleted', 'success'); })
-        .catch((err) => showToast(err.message || 'Failed to delete quota', 'error'));
+  if (target.classList.contains('delete-wallet')) {
+    openConfirm('Delete wallet', 'Delete this wallet permanently? Its remaining balance will be transferred to Savings. This cannot be undone.', '', () => {
+      fetchJSON(`/api/wallets/${target.dataset.id}`, { method: 'DELETE' })
+        .then(() => { refreshData(); showToast('Wallet deleted', 'success'); })
+        .catch((err) => showToast(err.message || 'Failed to delete wallet', 'error'));
     });
   }
   if (target.classList.contains('edit-transaction')) {
@@ -538,11 +699,42 @@ document.addEventListener('click', (event) => {
         .catch((err) => showToast(err.message || 'Failed to delete transaction', 'error'));
     });
   }
+  if (target.classList.contains('task-edit-btn')) {
+    editingTaskId = target.dataset.id;
+    renderTasks(currentTasks);
+  }
+  if (target.classList.contains('task-cancel-btn')) {
+    editingTaskId = null;
+    renderTasks(currentTasks);
+  }
+  if (target.classList.contains('task-save-btn')) {
+    const id = target.dataset.id;
+    const li = target.closest('.task-item');
+    const titleInput = li && li.querySelector('.task-title-edit');
+    const dueInput = li && li.querySelector('.task-due-edit');
+    const title = titleInput ? titleInput.value.trim() : '';
+    if (!title) {
+      showToast('Task title cannot be empty', 'error');
+      return;
+    }
+    const payload = { title, due_date: (dueInput && dueInput.value) || '' };
+    fetchJSON(`/api/tasks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(() => {
+        editingTaskId = null;
+        showToast('Task updated', 'success');
+        refreshData();
+      })
+      .catch((err) => showToast(err.message || 'Failed to update task', 'error'));
+  }
   if (target.classList.contains('settle-loan')) {
     openLoanSettlePanel(target.dataset.counterparty);
   }
-  if (target.classList.contains('settle-interquota-loan')) {
-    openInterQuotaSettlePanel(
+  if (target.classList.contains('settle-interwallet-loan')) {
+    openInterWalletSettlePanel(
       target.dataset.lenderId,
       target.dataset.lenderName,
       target.dataset.borrowerId,
@@ -551,37 +743,42 @@ document.addEventListener('click', (event) => {
   }
 });
 
-function findQuota(id) {
-  return currentQuotas.find((q) => String(q.id) === String(id));
+function findWallet(id) {
+  return currentWallets.find((q) => String(q.id) === String(id));
 }
 
 function findCategory(id) {
   return currentCategories.find((c) => String(c.id) === String(id));
 }
 
-function openEditQuota(id) {
-  const quota = findQuota(id);
-  if (!quota) return showToast('Quota not found', 'error');
-  editingQuotaId = id;
-  quotaForm.querySelector('#quota-name').value = quota.name || '';
-  quotaForm.querySelector('#quota-mode').value = quota.scope || 'Both';
-  quotaForm.querySelector('#quota-target-amount').value = quota.target_amount || '';
-  quotaForm.querySelector('#quota-eom-destination').value = quota.eom_sweep_destination || '';
-  quotaForm.querySelector('#quota-form-heading').textContent = 'Edit Quota';
-  quotaSubmit.textContent = 'Save Quota';
-  quotaMode.disabled = true;
-  quotaModeNote.textContent = 'Quota scope cannot be changed while editing. Create a new quota to change scope.';
-  updateQuotaFormFields();
+function openEditWallet(id) {
+  const wallet = findWallet(id);
+  if (!wallet) return showToast('Wallet not found', 'error');
+  
+  editingWalletId = id;
+  walletForm.querySelector('#wallet-name').value = wallet.name || '';
+  walletForm.querySelector('#wallet-mode').value = wallet.scope || 'Both';
+  // Changed to ?? to prevent 0 from being erased
+  walletForm.querySelector('#wallet-target-amount').value = wallet.target_amount ?? '';
+  walletForm.querySelector('#wallet-eom-destination').value = wallet.eom_sweep_destination || '';
+  walletForm.querySelector('#wallet-form-heading').textContent = 'Edit Wallet';
+  walletSubmit.textContent = 'Save Wallet';
+  walletMode.disabled = true;
+  walletModeNote.textContent = 'Wallet scope cannot be changed while editing. Create a new wallet to change scope.';
+  
+  updateWalletFormFields();
 }
 
 function openEditTransaction(id) {
   const txn = currentTransactions.find((t) => String(t.id) === String(id));
   if (!txn) return showToast('Transaction not found', 'error');
+  
   editingTransactionId = id;
   transactionForm.querySelector('#tx-type').value = txn.type || 'Debit';
-  transactionForm.querySelector('#tx-amount').value = txn.amount || '';
-  transactionForm.querySelector('#tx-source').value = txn.source_quota_id || '';
-  transactionForm.querySelector('#tx-destination').value = txn.destination_quota_id || '';
+  // Changed to ?? to prevent 0 from being erased
+  transactionForm.querySelector('#tx-amount').value = txn.amount ?? '';
+  transactionForm.querySelector('#tx-source').value = txn.source_wallet_id || '';
+  transactionForm.querySelector('#tx-destination').value = txn.destination_wallet_id || '';
   transactionForm.querySelector('#tx-category').value = txn.category || '';
   transactionForm.querySelector('#tx-counterparty').value = txn.counterparty || '';
   transactionForm.querySelector('#tx-payment-mode').value = txn.payment_mode || paymentModes[0];
@@ -590,6 +787,7 @@ function openEditTransaction(id) {
   transactionForm.querySelector('#tx-details').value = txn.details || '';
   transactionForm.querySelector('#transaction-form-heading').textContent = 'Edit Transaction';
   txSubmit.textContent = 'Save Transaction';
+  
   updateTransactionFormFields();
 }
 
@@ -617,25 +815,25 @@ transactionForm && transactionForm.addEventListener('submit', (ev) => {
     });
 });
 
-quotaForm && quotaForm.addEventListener('submit', (ev) => {
+walletForm && walletForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
-  setFormError('quota-error', '');
-  const fd = new FormData(quotaForm);
+  setFormError('wallet-error', '');
+  const fd = new FormData(walletForm);
   const payload = Object.fromEntries(fd.entries());
   normalizeFormNumbers(payload, ['target_amount']);
   if (payload.mode === 'Global Only' && payload.monthly_allocation) {
-    return setFormError('quota-error', 'Monthly allocation is not applicable to Global Only quotas');
+    return setFormError('wallet-error', 'Monthly allocation is not applicable to Global Only wallets');
   }
-  const method = editingQuotaId ? 'PUT' : 'POST';
-  const url = editingQuotaId ? `/api/quotas/${editingQuotaId}` : '/api/quotas';
+  const method = editingWalletId ? 'PUT' : 'POST';
+  const url = editingWalletId ? `/api/wallets/${editingWalletId}` : '/api/wallets';
   fetchJSON(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(() => {
-      showToast(editingQuotaId ? 'Quota updated' : 'Quota created', 'success');
-      resetQuotaForm();
+      showToast(editingWalletId ? 'Wallet updated' : 'Wallet created', 'success');
+      resetWalletForm();
       refreshData();
     })
     .catch((err) => {
-      setFormError('quota-error', err.message || 'Failed to save quota');
+      setFormError('wallet-error', err.message || 'Failed to save wallet');
     });
 });
 
@@ -657,50 +855,132 @@ recategorizeForm && recategorizeForm.addEventListener('submit', (ev) => {
     .catch((err) => showToast(err.message || 'Failed to recategorize category', 'error'));
 });
 
-txType && txType.addEventListener('change', updateTransactionFormFields);
-quotaMode && quotaMode.addEventListener('change', updateQuotaFormFields);
-txCancel && txCancel.addEventListener('click', resetTransactionForm);
-quotaCancel && quotaCancel.addEventListener('click', resetQuotaForm);
+taskForm && taskForm.addEventListener('submit', (ev) => {
+  ev.preventDefault();
+  setFormError('task-error', '');
+  const title = taskTitleInput.value.trim();
+  if (!title) {
+    setFormError('task-error', 'Task title is required');
+    return;
+  }
+  const payload = { title, due_date: taskDueInput.value || formatDate(new Date()) };
+  fetchJSON('/api/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+    .then(() => {
+      taskForm.reset();
+      if (taskDueInput) taskDueInput.value = formatDate(new Date());
+      showToast('Task added', 'success');
+      refreshData();
+    })
+    .catch((err) => setFormError('task-error', err.message || 'Failed to add task'));
+});
 
-function refreshQuotasAndCategories() {
-  buildSelectOptions(txSource, currentQuotas.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
+// Checking the box IS the delete action (there's no separate "mark done"
+// state) — strike the title through for 2s so the click reads as
+// confirmed, then actually DELETE it. If the DELETE fails, roll the
+// checkbox and strikethrough back so the task doesn't look gone when it
+// isn't.
+document.addEventListener('change', (event) => {
+  const checkbox = event.target.closest('.task-delete-checkbox');
+  if (!checkbox) return;
+  const id = checkbox.dataset.id;
+  const li = checkbox.closest('.task-item');
+  if (!li) return;
+
+  checkbox.disabled = true;
+  li.classList.add('task-strike');
+
+  setTimeout(() => {
+    fetchJSON(`/api/tasks/${id}`, { method: 'DELETE' })
+      .then(() => {
+        showToast('Task deleted', 'success');
+        refreshData();
+      })
+      .catch((err) => {
+        showToast(err.message || 'Failed to delete task', 'error');
+        checkbox.disabled = false;
+        checkbox.checked = false;
+        li.classList.remove('task-strike');
+      });
+  }, 2000);
+});
+
+deleteAllTasksBtn && deleteAllTasksBtn.addEventListener('click', () => {
+  if (!currentTasks.length) {
+    showToast('No tasks to delete', 'error');
+    return;
+  }
+  
+  openConfirm(
+    'Delete all tasks',
+    `Delete all ${currentTasks.length} task${currentTasks.length === 1 ? '' : 's'}? This cannot be undone.`,
+    '',
+    () => {
+      // Fires ONE single network request to wipe the collection
+      fetchJSON(`/api/tasks`, { method: 'DELETE' })
+        .then(() => {
+          showToast('All tasks deleted', 'success');
+          refreshData();
+        })
+        .catch((err) => {
+          showToast(err.message || 'Failed to delete all tasks', 'error');
+          refreshTasks(); 
+        });
+    },
+  );
+});
+
+txType && txType.addEventListener('change', updateTransactionFormFields);
+walletMode && walletMode.addEventListener('change', updateWalletFormFields);
+txCancel && txCancel.addEventListener('click', resetTransactionForm);
+walletCancel && walletCancel.addEventListener('click', resetWalletForm);
+
+function refreshWalletsAndCategories() {
+  buildSelectOptions(txSource, currentWallets.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
   populateDestinationOptions(txType ? txType.value : '');
   buildSelectOptions(txCategory, currentCategories.map((c) => ({ value: c.name, label: c.name })));
   buildSelectOptions(sourceCategorySelect, currentCategories.map((c) => ({ value: c.id, label: c.name })));
   buildSelectOptions(destCategorySelect, currentCategories.map((c) => ({ value: c.id, label: c.name })));
-  buildSelectOptions(settleSource, currentQuotas.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
-  buildSelectOptions(document.getElementById('quota-eom-destination'), currentQuotas.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
+  buildSelectOptions(settleSource, currentWallets.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
+  buildSelectOptions(document.getElementById('wallet-eom-destination'), currentWallets.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
 }
 
 async function refreshData() {
   try {
-    const [quotas, categories, transactions, quotaTotals, categoryTotalsData, loanEntries, interQuotaLoanEntries] = await Promise.all([
-      fetchJSON('/api/quotas'),
+    const [wallets, categories, transactions, walletTotals, categoryTotalsData, loanEntries, interWalletLoanEntries] = await Promise.all([
+      fetchJSON('/api/wallets'),
       fetchJSON('/api/categories'),
       fetchJSON('/api/transactions'),
-      fetchJSON('/api/quotas/breakdowns'),
+      fetchJSON('/api/wallets/breakdowns'),
       fetchJSON('/api/categories/totals'),
       fetchJSON('/api/loan-ledger'),
-      fetchJSON('/api/inter-quota-loans'),
+      fetchJSON('/api/inter-wallet-loans')
     ]);
-    currentQuotas = quotas || [];
+    currentWallets = wallets || [];
     currentCategories = categories || [];
     currentTransactions = transactions || [];
-    renderQuotas(currentQuotas);
+    renderWallets(currentWallets);
     renderCategories(currentCategories);
     renderTransactions(currentTransactions);
     renderLoanLedger(loanEntries || []);
-    renderInterQuotaLoanLedger(interQuotaLoanEntries || []);
-    renderDashboard(quotaTotals, categoryTotalsData);
-    refreshQuotasAndCategories();
+    renderInterWalletLoanLedger(interWalletLoanEntries || []);
+    renderDashboard(walletTotals, categoryTotalsData);
+    refreshWalletsAndCategories();
   } catch (err) {
     showToast(err.message || 'Failed to refresh data', 'error');
   }
+  // Kept out of the Promise.all above deliberately: refreshTasks() has its
+  // own try/catch, so if /api/tasks isn't live on the backend yet, it
+  // won't take down the rest of the dashboard refresh with it.
+  refreshTasks();
 }
 
 if (txDate && !txDate.value) txDate.value = formatDate(new Date());
+if (taskDueInput && !taskDueInput.value) taskDueInput.value = formatDate(new Date());
 populateSelects();
 updateTransactionFormFields();
-updateQuotaFormFields();
+updateWalletFormFields();
 refreshData();
-EOF

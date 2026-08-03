@@ -17,9 +17,9 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 
-	// Assuming your internal packages are here
 	"financetracker/internal/domain"
 	"financetracker/internal/models"
+	"financetracker/internal/remote"
 	"financetracker/internal/storage"
 )
 
@@ -28,11 +28,11 @@ var ctx = context.Background()
 var rdb *redis.Client
 
 func init() {
-	err := godotenv.Load() // loads .env from current directory
+	err := godotenv.Load()
 	if err != nil {
 		log.Println("no .env file found, relying on system env vars")
 	}
-	rdb = redis.NewClient(NewRedisOptions())
+	rdb = redis.NewClient(storage.NewRedisOptions())
 
 	pong, err := rdb.Ping(ctx).Result()
 	if err != nil {
@@ -41,44 +41,45 @@ func init() {
 	fmt.Println("Connected to Redis DB:", pong)
 }
 
-func NewRedisOptions() *redis.Options {
-	db, _ := strconv.Atoi(os.Getenv("REDIS_DB"))
-
-	opts := &redis.Options{
-		Addr:     os.Getenv("REDIS_ADDR"), // e.g. "host:port"
-		Username: os.Getenv("REDIS_USER"),
-		Password: os.Getenv("REDIS_PASSWORD"),
-		DB:       db,
-	}
-
-	return opts
-}
-
 type apiServer struct {
 	store           *storage.Store
 	txService       *domain.TransactionService
-	quotaService    *domain.QuotaService
+	walletService   *domain.WalletService
 	categoryService *domain.CategoryService
 	loanService     *domain.LoanService
 	schedule        *domain.ScheduleService
+	tasks           *remote.TodoClient
 }
-
-// ... (your routes function stays exactly the same) ...
 
 func main() {
 
+	// ************************* Logging Utility ********************************************
+	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Fatalf("could not open log file: %v", err)
+	}
+	defer logFile.Close()
+	log.SetOutput(logFile)
+
+	// ************************* Server Initialization ********************************************
 	store := storage.NewStore(rdb)
 	if err := store.Load(); err != nil {
 		log.Fatalf("failed to load data from redis: %v", err)
 	}
 
+	todoServerURL := os.Getenv("TODO_SERVER_URL")
+	if todoServerURL == "" {
+		todoServerURL = remote.DefaultTodoServerURL
+	}
+
 	server := &apiServer{
 		store:           store,
 		txService:       domain.NewTransactionService(store),
-		quotaService:    domain.NewQuotaService(store),
+		walletService:   domain.NewWalletService(store),
 		categoryService: domain.NewCategoryService(store),
 		loanService:     domain.NewLoanService(store),
 		schedule:        domain.NewScheduleService(store),
+		tasks:           remote.NewTodoClient(todoServerURL, remote.TodoServerTimeout),
 	}
 
 	addr := os.Getenv("ADDR")
@@ -86,38 +87,23 @@ func main() {
 		addr = ":2911"
 	}
 
-	log.Printf("starting finance tracker backend on %s", addr)
-
-	// 1. Grab your fully built router
 	baseHandler := server.routes()
 
-	// 2. Create a custom http.Server instead of using http.ListenAndServe directly
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: baseHandler,
 	}
 
-	// 3. Configure the native Protocols to allow unencrypted HTTP/2
 	srv.Protocols = new(http.Protocols)
 	srv.Protocols.SetHTTP1(true)
 	srv.Protocols.SetUnencryptedHTTP2(true)
 
-	// 4. Start the server!
+	log.Println("server starting at PORT", addr)
 	log.Fatal(srv.ListenAndServe())
 }
 
-// reloadMiddleware re-reads the in-memory store from Redis before every
-// request — including GETs. Previously, Store.Load() only ran once at
-// process startup, so the in-memory cache never picked up changes made
-// to Redis outside the running server (e.g. editing keys directly) until
-// the next process restart. Update() (used by POST/PUT/DELETE handlers)
-// mutates and persists that same in-memory copy, which is why writes
-// made through the app appeared to "refresh" things — they were pushing
-// the in-memory state forward, not actually pulling from Redis.
-//
-// This does add a Redis round trip to every request, but for this app's
-// scale that's a non-issue, and correctness (always seeing current DB
-// state) matters more here than shaving that latency.
+// **********************************MiddleWare Methods****************************************88
+
 func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.Load(); err != nil {
@@ -127,30 +113,70 @@ func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// *************************************Route Handler Method*********************************************
+
 func (s *apiServer) routes() http.Handler {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/api/status", s.handleStatus)
+
+	mux.HandleFunc("/api/wallets", s.handleWallets)
+	mux.HandleFunc("/api/wallets/breakdowns", s.handleWalletBreakdowns)
+	mux.HandleFunc("/api/wallets/", s.handleWalletByID)
+
 	mux.HandleFunc("/api/transactions", s.handleTransactions)
 	mux.HandleFunc("/api/transactions/", s.handleTransactionByID)
-	mux.HandleFunc("/api/quotas", s.handleQuotas)
-	mux.HandleFunc("/api/quotas/breakdowns", s.handleQuotaBreakdowns)
-	mux.HandleFunc("/api/quotas/", s.handleQuotaByID)
+
 	mux.HandleFunc("/api/categories", s.handleCategories)
 	mux.HandleFunc("/api/categories/totals", s.handleCategoryTotals)
 	mux.HandleFunc("/api/categories/", s.handleCategoryByID)
 	mux.HandleFunc("/api/categories/recategorize", s.handleCategoryRecategorize)
+
 	mux.HandleFunc("/api/funding-remediation", s.handleFundingRemediation)
-	mux.HandleFunc("/api/export", s.handleExport)
-	mux.HandleFunc("/api/import", s.handleImport)
+
 	mux.HandleFunc("/api/loan-ledger", s.handleLoanLedger)
-	mux.HandleFunc("/api/inter-quota-loans", s.handleInterQuotaLoans)
-	mux.HandleFunc("/api/inter-quota-loans/settle", s.handleSettleInterQuotaLoan)
+
+	mux.HandleFunc("/api/inter-wallet-loans", s.handleInterWalletLoans)
+	mux.HandleFunc("/api/inter-wallet-loans/settle", s.handleSettleInterWalletLoan)
+
 	mux.HandleFunc("/api/schedule/end", s.handleScheduleEnd)
 	mux.HandleFunc("/api/funding-options", s.handleFundingOptions)
+
+	mux.HandleFunc("/api/tasks", s.handleTasks)
+	mux.HandleFunc("/api/tasks/", s.handleTaskbyID)
+
 	mux.Handle("/", http.FileServer(http.Dir("ui")))
 
 	return s.reloadMiddleware(mux)
 }
+
+// Response Writing Functions
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeAPIError(w http.ResponseWriter, err error) {
+	if err == nil {
+		http.Error(w, "unexpected nil error", http.StatusInternalServerError)
+		return
+	}
+	if insuff, ok := err.(*domain.InsufficientFundsError); ok {
+		writeJSON(w, http.StatusUnprocessableEntity, insuff)
+		return
+	}
+	http.Error(w, err.Error(), http.StatusBadRequest)
+}
+
+func newID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// ******************************* Handler Method for Status ************************************************
 
 func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -159,6 +185,8 @@ func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
+
+// ************************************ Handler Methods for Wallets ************************************************
 
 func (s *apiServer) handleTransactions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -213,11 +241,13 @@ func (s *apiServer) handleTransactionByID(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *apiServer) handleQuotas(w http.ResponseWriter, r *http.Request) {
+// **************************** Handler Methods for Categories ************************************************
+
+func (s *apiServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		s.store.View(func(d storage.Data) {
-			writeJSON(w, http.StatusOK, d.Quotas)
+			writeJSON(w, http.StatusOK, d.Wallets)
 		})
 	case http.MethodPost:
 		var req struct {
@@ -231,7 +261,7 @@ func (s *apiServer) handleQuotas(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		created, err := s.quotaService.CreateQuota(req.Mode, req.Name, req.TargetAmount, req.EOMSweepDestination)
+		created, err := s.walletService.CreateWallet(req.Mode, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -242,7 +272,7 @@ func (s *apiServer) handleQuotas(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *apiServer) handleQuotaBreakdowns(w http.ResponseWriter, r *http.Request) {
+func (s *apiServer) handleWalletBreakdowns(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -252,26 +282,26 @@ func (s *apiServer) handleQuotaBreakdowns(w http.ResponseWriter, r *http.Request
 
 	switch scope {
 	case "", "all":
-		monthly, err := s.quotaService.AllMonthlyBreakdowns(now)
+		monthly, err := s.walletService.AllMonthlyBreakdowns(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
-		global, err := s.quotaService.AllGlobalBreakdowns()
+		global, err := s.walletService.AllGlobalBreakdowns()
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"monthly": monthly, "global": global})
 	case "monthly":
-		monthly, err := s.quotaService.AllMonthlyBreakdowns(now)
+		monthly, err := s.walletService.AllMonthlyBreakdowns(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, monthly)
 	case "global":
-		global, err := s.quotaService.AllGlobalBreakdowns()
+		global, err := s.walletService.AllGlobalBreakdowns()
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -282,8 +312,8 @@ func (s *apiServer) handleQuotaBreakdowns(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *apiServer) handleQuotaByID(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.URL.Path, "/api/quotas/") {
+func (s *apiServer) handleWalletByID(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, "/api/wallets/") {
 		http.NotFound(w, r)
 		return
 	}
@@ -300,14 +330,14 @@ func (s *apiServer) handleQuotaByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		saved, err := s.quotaService.UpdateQuota(id, req.Name, req.TargetAmount, req.EOMSweepDestination)
+		saved, err := s.walletService.UpdateWallet(id, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)
 	case http.MethodDelete:
-		saved, err := s.quotaService.DeleteQuota(id)
+		saved, err := s.walletService.DeleteWallet(id)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -317,6 +347,8 @@ func (s *apiServer) handleQuotaByID(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
+// **************************** Handler Methods for Categories ************************************************
 
 func (s *apiServer) handleCategories(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -425,20 +457,6 @@ func (s *apiServer) handleCategoryByID(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *apiServer) handleExport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	s.store.View(func(d storage.Data) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Content-Disposition", "attachment; filename=finance-tracker-export.json")
-		if err := json.NewEncoder(w).Encode(d); err != nil {
-			http.Error(w, fmt.Sprintf("failed to encode export data: %v", err), http.StatusInternalServerError)
-		}
-	})
-}
-
 func (s *apiServer) handleCategoryRecategorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -459,29 +477,7 @@ func (s *apiServer) handleCategoryRecategorize(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]string{"status": "recategorized"})
 }
 
-func (s *apiServer) handleImport(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var imported storage.Data
-	if err := json.NewDecoder(r.Body).Decode(&imported); err != nil {
-		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
-		return
-	}
-	if err := validateImportData(imported); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	if err := s.store.Update(func(d *storage.Data) error {
-		*d = imported
-		return nil
-	}); err != nil {
-		writeAPIError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "imported"})
-}
+// **************************Handler for triggering the end-of-month sweep manually***************************
 
 func (s *apiServer) handleScheduleEnd(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -496,15 +492,17 @@ func (s *apiServer) handleScheduleEnd(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "month-end sweep completed"})
 }
 
+// **************************Handler Methods for transferring funds between wallets***************************
+
 func (s *apiServer) handleFundingOptions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	quotaID := r.URL.Query().Get("quota_id")
+	walletID := r.URL.Query().Get("wallet_id")
 	amountParam := r.URL.Query().Get("amount")
-	if quotaID == "" || amountParam == "" {
-		http.Error(w, "quota_id and amount are required", http.StatusBadRequest)
+	if walletID == "" || amountParam == "" {
+		http.Error(w, "wallet_id and amount are required", http.StatusBadRequest)
 		return
 	}
 	amount, err := strconv.ParseFloat(amountParam, 64)
@@ -512,7 +510,7 @@ func (s *apiServer) handleFundingOptions(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("invalid amount: %v", err), http.StatusBadRequest)
 		return
 	}
-	options, err := s.txService.EligibleFundingOptions(quotaID, amount, time.Now())
+	options, err := s.txService.EligibleFundingOptions(walletID, amount, time.Now())
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -527,25 +525,22 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 	}
 	var req struct {
 		Mechanism         models.TransactionType   `json:"mechanism"`
-		SourceQuotaID     string                   `json:"source_quota_id"`
-		TargetQuotaID     string                   `json:"target_quota_id"`
+		SourceWalletID    string                   `json:"source_wallet_id"`
+		TargetWalletID    string                   `json:"target_wallet_id"`
 		Amount            float64                  `json:"amount"`
 		Category          string                   `json:"category,omitempty"`
 		Counterparty      string                   `json:"counterparty,omitempty"`
 		PaymentMode       models.PaymentMode       `json:"payment_mode,omitempty"`
 		PaymentInstrument models.PaymentInstrument `json:"payment_instrument,omitempty"`
-		// Date is decoded as a plain string (not time.Time) so it accepts
-		// both a full RFC3339 timestamp and a bare "YYYY-MM-DD" from an
-		// HTML date input — see models.ParseFlexibleDate.
-		Date    string `json:"date,omitempty"`
-		Details string `json:"details,omitempty"`
+		Date              string                   `json:"date,omitempty"`
+		Details           string                   `json:"details,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	if req.Mechanism != models.SelfTransfer && req.Mechanism != models.InterQuotaLoan {
-		http.Error(w, "mechanism must be Self Transfer or Inter-Quota Loan", http.StatusBadRequest)
+	if req.Mechanism != models.SelfTransfer && req.Mechanism != models.InterWalletLoan {
+		http.Error(w, "mechanism must be Self Transfer or Inter-Wallet Loan", http.StatusBadRequest)
 		return
 	}
 	date, err := models.ParseFlexibleDate(req.Date)
@@ -554,13 +549,13 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	funding := domain.FundingOption{
-		Mechanism:     req.Mechanism,
-		SourceQuotaID: req.SourceQuotaID,
+		Mechanism:      req.Mechanism,
+		SourceWalletID: req.SourceWalletID,
 	}
 	debit := models.Transaction{
 		Type:              models.Debit,
 		Amount:            req.Amount,
-		SourceQuotaID:     req.TargetQuotaID,
+		SourceWalletID:    req.TargetWalletID,
 		Category:          req.Category,
 		Counterparty:      req.Counterparty,
 		PaymentMode:       req.PaymentMode,
@@ -576,6 +571,8 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusCreated, map[string]models.Transaction{"funding": fundingTx, "debit": debitTx})
 }
 
+// *******************************Handler Methods for Loans************************************************
+
 func (s *apiServer) handleLoanLedger(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -589,12 +586,12 @@ func (s *apiServer) handleLoanLedger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, entries)
 }
 
-func (s *apiServer) handleInterQuotaLoans(w http.ResponseWriter, r *http.Request) {
+func (s *apiServer) handleInterWalletLoans(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	entries, err := s.loanService.AllInterQuotaLoans()
+	entries, err := s.loanService.AllInterWalletLoans()
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -602,21 +599,21 @@ func (s *apiServer) handleInterQuotaLoans(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, entries)
 }
 
-func (s *apiServer) handleSettleInterQuotaLoan(w http.ResponseWriter, r *http.Request) {
+func (s *apiServer) handleSettleInterWalletLoan(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var req struct {
-		BorrowerQuotaID string  `json:"borrower_quota_id"`
-		LenderQuotaID   string  `json:"lender_quota_id"`
-		Amount          float64 `json:"amount"`
+		BorrowerWalletID string  `json:"borrower_wallet_id"`
+		LenderWalletID   string  `json:"lender_wallet_id"`
+		Amount           float64 `json:"amount"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	saved, err := s.loanService.SettleInterQuotaLoan(req.BorrowerQuotaID, req.LenderQuotaID, req.Amount, time.Now())
+	saved, err := s.loanService.SettleInterWalletLoan(req.BorrowerWalletID, req.LenderWalletID, req.Amount, time.Now())
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -624,48 +621,40 @@ func (s *apiServer) handleSettleInterQuotaLoan(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, saved)
 }
 
-func validateImportData(data storage.Data) error {
-	hasSavings := false
-	hasSettled := false
-	for _, q := range data.Quotas {
-		if q.ID == models.SavingsQuotaID {
-			hasSavings = true
-		}
+// *******************Handler Methods for To-Do List (Tasks) Feature***************************
+
+func (s *apiServer) handleTasks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet, http.MethodPost, http.MethodDelete:
+		s.proxyTasks(w, r, "")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	for _, c := range data.Categories {
-		if c.ID == models.SettledCategoryID {
-			hasSettled = true
-		}
-	}
-	if !hasSavings {
-		return fmt.Errorf("imported data must include the mandatory Savings quota")
-	}
-	if !hasSettled {
-		return fmt.Errorf("imported data must include the mandatory Settled category")
-	}
-	return nil
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeAPIError(w http.ResponseWriter, err error) {
-	if err == nil {
-		http.Error(w, "unexpected nil error", http.StatusInternalServerError)
+func (s *apiServer) handleTaskbyID(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.URL.Path, "/api/tasks/") {
+		http.NotFound(w, r)
 		return
 	}
-	if insuff, ok := err.(*domain.InsufficientFundsError); ok {
-		writeJSON(w, http.StatusUnprocessableEntity, insuff)
-		return
+	id := path.Base(r.URL.Path)
+	switch r.Method {
+	case http.MethodGet, http.MethodPut, http.MethodDelete:
+		s.proxyTasks(w, r, "/"+id)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	http.Error(w, err.Error(), http.StatusBadRequest)
 }
 
-func newID() string {
-	b := make([]byte, 8)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+func (s *apiServer) proxyTasks(w http.ResponseWriter, r *http.Request, pathSuffix string) {
+	resp, err := s.tasks.Forward(r.Context(), r.Method, pathSuffix, r.Body, r.Header)
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{
+			"error": fmt.Sprintf("task server unavailable: %v", err),
+		})
+		return
+	}
+	w.Header().Set("Content-Type", resp.ContentType)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(resp.Body)
 }

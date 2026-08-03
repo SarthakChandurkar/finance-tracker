@@ -8,7 +8,6 @@ import (
 	"financetracker/internal/storage"
 )
 
-// CategoryService manages category creation, deletion, and recategorization.
 type CategoryService struct {
 	store *storage.Store
 }
@@ -19,25 +18,23 @@ func NewCategoryService(store *storage.Store) *CategoryService {
 
 func (s *CategoryService) GetCategoryByID(id string) (models.Category, error) {
 	var found bool
-	var result models.Category // 1. Declare an empty variable outside the inner function
+	var result models.Category
 
 	s.store.View(func(d storage.Data) {
 		for _, cat := range d.Categories {
 			if cat.ID == id {
 				found = true
-				result = cat // 2. Assign the inner data to the outer variable
-				break        // 3. Good practice: stop looping once we find it!
+				result = cat
+				break
 			}
 		}
 	})
 
-	// 4. Check if we actually found it after the View function finishes
 	if !found {
-		// Return an empty category and a helpful error
+
 		return models.Category{}, fmt.Errorf("category '%s' not found", id)
 	}
 
-	// 5. Return the saved category and nil (no error)
 	return result, nil
 }
 

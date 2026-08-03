@@ -20,8 +20,9 @@
       <nav>
         <button data-view="dashboard" class="active">Dashboard</button>
         <button data-view="transactions">Transactions</button>
-        <button data-view="quotas">Quotas</button>
+        <button data-view="wallets">Wallets</button>
         <button data-view="categories">Categories</button>
+        <button data-view="tasks">Tasks</button>
         <button data-view="system">System Actions</button>
       </nav>
     </header>
@@ -31,19 +32,23 @@
         <h2>Dashboard</h2>
         <div class="dashboard-grid">
           <div class="card">
-            <h3>Quota Breakdowns</h3>
-            <div id="quota-breakdowns"></div>
+            <h3>Wallet Breakdowns</h3>
+            <div id="wallet-breakdowns"></div>
           </div>
           <div class="card">
             <h3>Category Totals</h3>
             <div id="category-totals"></div>
           </div>
           <div class="card">
+            <h3>Today's Tasks</h3>
+            <div id="today-tasks"></div>
+          </div>
+          <div class="card">
             <h3>Loan Ledger</h3>
             <h4>External Loans</h4>
             <div id="loan-ledger"></div>
-            <h4>Inter-Quota Loans</h4>
-            <div id="interquota-loan-ledger"></div>
+            <h4>Inter-Wallet Loans</h4>
+            <div id="interwallet-loan-ledger"></div>
           </div>
         </div>
       </section>
@@ -75,12 +80,12 @@
               <input id="tx-amount" name="amount" type="number" step="0.01" required />
             </div>
             <div>
-              <label for="tx-source">Source Quota</label>
-              <select id="tx-source" name="source_quota_id"></select>
+              <label for="tx-source">Source Wallet</label>
+              <select id="tx-source" name="source_wallet_id"></select>
             </div>
             <div>
-              <label for="tx-destination">Destination Quota</label>
-              <select id="tx-destination" name="destination_quota_id"></select>
+              <label for="tx-destination">Destination Wallet</label>
+              <select id="tx-destination" name="destination_wallet_id"></select>
             </div>
             <div>
               <label for="tx-category">Category</label>
@@ -146,42 +151,42 @@
         </div>
       </section>
 
-      <section id="quotas" class="view">
-        <h2>Quotas</h2>
+      <section id="wallets" class="view">
+        <h2>Wallets</h2>
         <div class="panel">
-          <form id="quota-form" class="form-grid">
+          <form id="wallet-form" class="form-grid">
             <div class="full-width">
-              <h4 id="quota-form-heading">Create Quota</h4>
+              <h4 id="wallet-form-heading">Create Wallet</h4>
             </div>
             <div>
-              <label for="quota-mode">Mode</label>
-              <select id="quota-mode" name="mode"></select>
-              <div id="quota-mode-note" style="font-size:0.9rem; color:#6b7280; margin-top:6px"></div>
+              <label for="wallet-mode">Mode</label>
+              <select id="wallet-mode" name="mode"></select>
+              <div id="wallet-mode-note" style="font-size:0.9rem; color:#6b7280; margin-top:6px"></div>
             </div>
             <div>
-              <label for="quota-name">Name</label>
-              <input id="quota-name" name="name" type="text" required />
+              <label for="wallet-name">Name</label>
+              <input id="wallet-name" name="name" type="text" required />
             </div>
             <div>
-              <label for="quota-target-amount">Target Amount</label>
-              <input id="quota-target-amount" name="target_amount" type="number" step="0.01" />
+              <label for="wallet-target-amount">Target Amount</label>
+              <input id="wallet-target-amount" name="target_amount" type="number" step="0.01" />
             </div>
             <div>
-              <label for="quota-eom-destination">EOM Sweep Destination</label>
-              <select id="quota-eom-destination" name="eom_sweep_destination"></select>
+              <label for="wallet-eom-destination">EOM Sweep Destination</label>
+              <select id="wallet-eom-destination" name="eom_sweep_destination"></select>
             </div>
             <div class="full-width actions">
-              <button id="quota-submit" type="submit">Create Quota</button>
-              <button id="quota-cancel" type="button">Cancel</button>
+              <button id="wallet-submit" type="submit">Create Wallet</button>
+              <button id="wallet-cancel" type="button">Cancel</button>
             </div>
-            <div class="form-error" id="quota-error"></div>
+            <div class="form-error" id="wallet-error"></div>
           </form>
         </div>
 
         <div class="panel">
-          <h3>Active Quotas</h3>
+          <h3>Active Wallets</h3>
           <div class="table-wrapper">
-            <table id="quota-table">
+            <table id="wallet-table">
               <thead>
                 <tr>
                   <th>Name</th>
@@ -244,6 +249,26 @@
           </div>
         </div>
       </section>
+
+      <section id="tasks" class="view">
+        <h2>Tasks</h2>
+        <div class="panel">
+          <form id="task-form" class="task-add-row">
+            <input id="task-title" name="title" type="text" placeholder="Add a task..." required />
+            <input id="task-due" name="due_date" type="date" />
+            <button id="task-submit" type="submit" class="task-add-btn" aria-label="Add task">+</button>
+          </form>
+          <div class="form-error" id="task-error"></div>
+        </div>
+
+        <div class="panel">
+          <div class="tasks-header">
+            <h3>All Tasks</h3>
+            <button id="delete-all-tasks" class="danger-btn" type="button">Delete All</button>
+          </div>
+          <ul id="task-list" class="task-list"></ul>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -259,7 +284,7 @@
         <input id="settle-amount" type="number" step="0.01" />
       </div>
       <div>
-        <label for="settle-source">Source Quota</label>
+        <label for="settle-source">Source Wallet</label>
         <select id="settle-source"></select>
       </div>
       <div class="actions">
@@ -268,20 +293,20 @@
       </div>
     </div>
   </div>
-  <div id="interquota-settle-panel" class="modal-overlay hidden">
+  <div id="interwallet-settle-panel" class="modal-overlay hidden">
     <div class="modal">
-      <h3>Settle Inter-Quota Loan</h3>
+      <h3>Settle Inter-Wallet Loan</h3>
       <div>
         <label>Loan</label>
-        <div id="interquota-settle-label"></div>
+        <div id="interwallet-settle-label"></div>
       </div>
       <div>
-        <label for="interquota-settle-amount">Amount</label>
-        <input id="interquota-settle-amount" type="number" step="0.01" />
+        <label for="interwallet-settle-amount">Amount</label>
+        <input id="interwallet-settle-amount" type="number" step="0.01" />
       </div>
       <div class="actions">
-        <button id="interquota-settle-send">Settle</button>
-        <button id="interquota-settle-cancel" type="button">Cancel</button>
+        <button id="interwallet-settle-send">Settle</button>
+        <button id="interwallet-settle-cancel" type="button">Cancel</button>
       </div>
     </div>
   </div>

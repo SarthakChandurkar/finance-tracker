@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 
 	"github.com/redis/go-redis/v9"
@@ -11,93 +14,52 @@ import (
 	"financetracker/internal/models"
 )
 
-// Data is still the shape the rest of the app (domain layer, handlers)
-// works with in memory — nothing about View()/Update() changes from the
-// caller's perspective. What changes is how Load()/saveLocked() get this
-// shape into and out of Redis: instead of one JSON blob, each entity gets
-// its own key, indexed by a Redis Set per collection.
+func NewRedisOptions() *redis.Options {
+	db, _ := strconv.Atoi(os.Getenv("REDIS_DB"))
+
+	opts := &redis.Options{
+		Addr:     os.Getenv("REDIS_ADDR"),
+		Username: os.Getenv("REDIS_USER"),
+		Password: os.Getenv("REDIS_PASSWORD"),
+		DB:       db,
+	}
+
+	return opts
+}
+
 type Data struct {
 	Transactions []models.Transaction `json:"transactions"`
-	Quotas       []models.Quota       `json:"quotas"`
+	Wallets      []models.Wallet      `json:"wallets"`
 	Categories   []models.Category    `json:"categories"`
 }
 
 const (
 	keyTxPrefix       = "tx:"
-	keyQuotaPrefix    = "quota:"
+	keyWalletPrefix   = "wallet:"
 	keyCategoryPrefix = "category:"
 
 	idxTransactions = "idx:transactions"
-	idxQuotas       = "idx:quotas"
+	idxWallets      = "idx:wallets"
 	idxCategories   = "idx:categories"
 )
 
-// Store wraps the in-memory Data with a mutex, same as before. Load() and
-// Update() still hand back/take a single Data value — only the Redis
-// layout underneath is schema-wise now.
-type Store struct {
-	mu   sync.RWMutex
-	rdb  *redis.Client
-	ctx  context.Context
-	data Data
+type Identifiable interface {
+	GetID() string
 }
 
-// NewStore creates a Store around the given Redis client. Unlike the
-// single-blob version, there's no "key" argument any more — the keys are
-// fixed per-entity-type prefixes/indexes, defined above.
-func NewStore(rdb *redis.Client) *Store {
-	return &Store{
-		rdb: rdb,
-		ctx: context.Background(),
-	}
+type entityCollection[T Identifiable] struct {
+	idxKey string
+	prefix string
 }
 
-// Load reads every entity from Redis into memory. If neither the quotas
-// nor categories index exists yet, this is treated as a first run: it
-// seeds the mandatory Savings quota (A2.2) and Settled category (A4.2)
-// and writes them out.
-func (s *Store) Load() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+var (
+	txCollection       = entityCollection[models.Transaction]{idxKey: idxTransactions, prefix: keyTxPrefix}
+	walletCollection   = entityCollection[models.Wallet]{idxKey: idxWallets, prefix: keyWalletPrefix}
+	categoryCollection = entityCollection[models.Category]{idxKey: idxCategories, prefix: keyCategoryPrefix}
+)
 
-	exists, err := s.rdb.Exists(s.ctx, idxQuotas, idxCategories).Result()
-	if err != nil {
-		return fmt.Errorf("checking redis for existing data: %w", err)
-	}
-	if exists == 0 {
-		s.data = Data{
-			Quotas:     []models.Quota{models.NewSavingsQuota()},
-			Categories: []models.Category{models.NewSettledCategory()},
-		}
-		return s.saveLocked()
-	}
-
-	txs, err := loadCollection[models.Transaction](s.ctx, s.rdb, idxTransactions, keyTxPrefix)
-	if err != nil {
-		return fmt.Errorf("loading transactions: %w", err)
-	}
-	quotas, err := loadCollection[models.Quota](s.ctx, s.rdb, idxQuotas, keyQuotaPrefix)
-	if err != nil {
-		return fmt.Errorf("loading quotas: %w", err)
-	}
-	categories, err := loadCollection[models.Category](s.ctx, s.rdb, idxCategories, keyCategoryPrefix)
-	if err != nil {
-		return fmt.Errorf("loading categories: %w", err)
-	}
-
-	s.data = Data{
-		Transactions: txs,
-		Quotas:       quotas,
-		Categories:   categories,
-	}
-	return nil
-}
-
-// loadCollection fetches every ID in idxKey's Set, then MGETs the actual
-// entity JSON for each one and unmarshals it into T. Generic so it works
-// identically for Transaction, Quota, and Category.
-func loadCollection[T any](ctx context.Context, rdb *redis.Client, idxKey, prefix string) ([]T, error) {
-	ids, err := rdb.SMembers(ctx, idxKey).Result()
+func (c entityCollection[T]) load(ctx context.Context, rdb *redis.Client) ([]T, error) {
+	ids, err := rdb.SMembers(ctx, c.idxKey).Result()
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +69,7 @@ func loadCollection[T any](ctx context.Context, rdb *redis.Client, idxKey, prefi
 
 	keys := make([]string, len(ids))
 	for i, id := range ids {
-		keys[i] = prefix + id
+		keys[i] = c.prefix + id
 	}
 
 	vals, err := rdb.MGet(ctx, keys...).Result()
@@ -118,9 +80,6 @@ func loadCollection[T any](ctx context.Context, rdb *redis.Client, idxKey, prefi
 	result := make([]T, 0, len(vals))
 	for _, v := range vals {
 		if v == nil {
-			// Index pointed at a key that no longer exists (e.g. a crash
-			// between deleting the entity and updating the index). Skip
-			// it rather than fail the whole load.
 			continue
 		}
 		str, ok := v.(string)
@@ -136,46 +95,8 @@ func loadCollection[T any](ctx context.Context, rdb *redis.Client, idxKey, prefi
 	return result, nil
 }
 
-// saveLocked writes the current in-memory Data back to Redis, one entity
-// per key, and keeps each idx:* Set in sync — including removing keys for
-// entities that were deleted from the in-memory slice since the last save.
-// The whole thing runs inside a single Redis transaction (TxPipeline) so
-// a concurrent reader never sees a half-updated state.
-func (s *Store) saveLocked() error {
-	pipe := s.rdb.TxPipeline()
-
-	if err := syncCollection(s.ctx, s.rdb, pipe, idxTransactions, keyTxPrefix,
-		s.data.Transactions, func(tx models.Transaction) string { return tx.ID }); err != nil {
-		return fmt.Errorf("syncing transactions: %w", err)
-	}
-	if err := syncCollection(s.ctx, s.rdb, pipe, idxQuotas, keyQuotaPrefix,
-		s.data.Quotas, func(q models.Quota) string { return q.ID }); err != nil {
-		return fmt.Errorf("syncing quotas: %w", err)
-	}
-	if err := syncCollection(s.ctx, s.rdb, pipe, idxCategories, keyCategoryPrefix,
-		s.data.Categories, func(c models.Category) string { return c.ID }); err != nil {
-		return fmt.Errorf("syncing categories: %w", err)
-	}
-
-	if _, err := pipe.Exec(s.ctx); err != nil {
-		return fmt.Errorf("writing data to redis: %w", err)
-	}
-	return nil
-}
-
-// syncCollection diffs the entity IDs currently in Redis's idx:* Set
-// against the IDs present in `items`, then queues (on pipe): a SET for
-// every current item, a DEL for every entity key that was removed, and a
-// full replace of the idx:* Set so it matches exactly.
-func syncCollection[T any](
-	ctx context.Context,
-	rdb *redis.Client,
-	pipe redis.Pipeliner,
-	idxKey, prefix string,
-	items []T,
-	idOf func(T) string,
-) error {
-	oldIDs, err := rdb.SMembers(ctx, idxKey).Result()
+func (c entityCollection[T]) queueSync(ctx context.Context, rdb *redis.Client, pipe redis.Pipeliner, items []T) error {
+	oldIDs, err := rdb.SMembers(ctx, c.idxKey).Result()
 	if err != nil {
 		return err
 	}
@@ -186,48 +107,176 @@ func syncCollection[T any](
 
 	newIDs := make([]string, 0, len(items))
 	for _, item := range items {
-		id := idOf(item)
+		id := item.GetID()
 		newIDs = append(newIDs, id)
-		delete(oldSet, id) // whatever's left in oldSet after this loop = removed entities
+		delete(oldSet, id)
 
 		b, err := json.Marshal(item)
 		if err != nil {
 			return err
 		}
-		pipe.Set(ctx, prefix+id, b, 0)
+		pipe.Set(ctx, c.prefix+id, b, 0)
 	}
 
-	// Delete keys for entities no longer present.
 	for removedID := range oldSet {
-		pipe.Del(ctx, prefix+removedID)
+		pipe.Del(ctx, c.prefix+removedID)
 	}
 
-	// Replace the index wholesale so it exactly matches newIDs.
-	pipe.Del(ctx, idxKey)
+	pipe.Del(ctx, c.idxKey)
 	if len(newIDs) > 0 {
 		members := make([]interface{}, len(newIDs))
 		for i, id := range newIDs {
 			members[i] = id
 		}
-		pipe.SAdd(ctx, idxKey, members...)
+		pipe.SAdd(ctx, c.idxKey, members...)
 	}
 	return nil
 }
 
-// View gives read-only access to the current in-memory data.
+type Store struct {
+	mu   sync.RWMutex
+	rdb  *redis.Client
+	ctx  context.Context
+	data Data
+}
+
+func NewStore(rdb *redis.Client) *Store {
+	return &Store{
+		rdb: rdb,
+		ctx: context.Background(),
+	}
+}
+
+func (s *Store) Load() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	exists, err := s.rdb.Exists(s.ctx, idxWallets, idxCategories).Result()
+	if err != nil {
+		return fmt.Errorf("checking redis for existing data: %w", err)
+	}
+	if exists == 0 {
+		before, err := snapshotJSON(Data{})
+		if err != nil {
+			return err
+		}
+		s.data = Data{
+			Wallets:    []models.Wallet{models.NewSavingsWallet()},
+			Categories: []models.Category{models.NewSettledCategory()},
+		}
+		return s.saveChanged(before)
+	}
+
+	txs, err := txCollection.load(s.ctx, s.rdb)
+	if err != nil {
+		return fmt.Errorf("loading transactions: %w", err)
+	}
+	wallets, err := walletCollection.load(s.ctx, s.rdb)
+	if err != nil {
+		return fmt.Errorf("loading wallets: %w", err)
+	}
+	categories, err := categoryCollection.load(s.ctx, s.rdb)
+	if err != nil {
+		return fmt.Errorf("loading categories: %w", err)
+	}
+
+	s.data = Data{
+		Transactions: txs,
+		Wallets:      wallets,
+		Categories:   categories,
+	}
+	return nil
+}
+
+type dataSnapshot struct {
+	transactions []byte
+	wallets      []byte
+	categories   []byte
+}
+
+func snapshotJSON(d Data) (dataSnapshot, error) {
+	var snap dataSnapshot
+	var err error
+	if snap.transactions, err = json.Marshal(d.Transactions); err != nil {
+		return snap, fmt.Errorf("snapshotting transactions: %w", err)
+	}
+	if snap.wallets, err = json.Marshal(d.Wallets); err != nil {
+		return snap, fmt.Errorf("snapshotting wallets: %w", err)
+	}
+	if snap.categories, err = json.Marshal(d.Categories); err != nil {
+		return snap, fmt.Errorf("snapshotting categories: %w", err)
+	}
+	return snap, nil
+}
+
+func queueIfChanged[T Identifiable](
+	ctx context.Context,
+	rdb *redis.Client,
+	pipe redis.Pipeliner,
+	c entityCollection[T],
+	beforeJSON []byte,
+	items []T,
+) (bool, error) {
+	afterJSON, err := json.Marshal(items)
+	if err != nil {
+		return false, err
+	}
+	if bytes.Equal(beforeJSON, afterJSON) {
+		return false, nil
+	}
+	if err := c.queueSync(ctx, rdb, pipe, items); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *Store) saveChanged(before dataSnapshot) error {
+	pipe := s.rdb.TxPipeline()
+	touched := false
+
+	if changed, err := queueIfChanged(s.ctx, s.rdb, pipe, txCollection, before.transactions, s.data.Transactions); err != nil {
+		return fmt.Errorf("syncing transactions: %w", err)
+	} else if changed {
+		touched = true
+	}
+	if changed, err := queueIfChanged(s.ctx, s.rdb, pipe, walletCollection, before.wallets, s.data.Wallets); err != nil {
+		return fmt.Errorf("syncing wallets: %w", err)
+	} else if changed {
+		touched = true
+	}
+	if changed, err := queueIfChanged(s.ctx, s.rdb, pipe, categoryCollection, before.categories, s.data.Categories); err != nil {
+		return fmt.Errorf("syncing categories: %w", err)
+	} else if changed {
+		touched = true
+	}
+
+	if !touched {
+		return nil
+	}
+	if _, err := pipe.Exec(s.ctx); err != nil {
+		return fmt.Errorf("writing data to redis: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) View(fn func(Data)) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	fn(s.data)
 }
 
-// Update gives exclusive access, applies fn, then persists to Redis.
 func (s *Store) Update(fn func(*Data) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	before, err := snapshotJSON(s.data)
+	if err != nil {
+		return fmt.Errorf("snapshotting before update: %w", err)
+	}
+
 	if err := fn(&s.data); err != nil {
 		return err
 	}
-	return s.saveLocked()
+
+	return s.saveChanged(before)
 }
