@@ -53,13 +53,7 @@ type apiServer struct {
 
 func main() {
 
-	// ************************* Logging Utility ********************************************
-	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		log.Fatalf("could not open log file: %v", err)
-	}
-	defer logFile.Close()
-	log.SetOutput(logFile)
+	setupLogging()
 
 	// ************************* Server Initialization ********************************************
 	store := storage.NewStore(rdb)
@@ -147,7 +141,7 @@ func (s *apiServer) routes() http.Handler {
 
 	mux.Handle("/", http.FileServer(http.Dir("ui")))
 
-	return s.reloadMiddleware(mux)
+	return loggingMiddleware(s.reloadMiddleware(mux))
 }
 
 // Response Writing Functions

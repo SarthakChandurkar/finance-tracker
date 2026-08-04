@@ -45,8 +45,18 @@ func validateSelfTransfer(source, dest models.Wallet) error {
 	case source.IsGlobal() && dest.IsGlobal():
 		return nil
 
-	default:
+	case source.IsMonthly() && dest.IsMonthly():
 
+		if source.ID == dest.ID {
+			return fmt.Errorf("a wallet cannot self-transfer to itself")
+		}
+		if (source.IsMonthly() && source.IsGlobal()) && !(dest.IsMonthly() && dest.IsGlobal()) {
+			return nil
+		}
+
+		return fmt.Errorf("a monthly wallet cannot self-transfer to another double scoped wallet (Global + Monthly)")
+
+	default:
 		return fmt.Errorf("self transfer not permitted from a %s wallet to a %s wallet", source.Scope, dest.Scope)
 	}
 }
@@ -63,7 +73,10 @@ func validateInterWalletLoan(source, dest models.Wallet) error {
 		if source.ID == dest.ID {
 			return fmt.Errorf("a wallet cannot lend to itself")
 		}
-		return nil
+		if (source.IsMonthly() && source.IsGlobal()) && !(dest.IsMonthly() && dest.IsGlobal()) {
+			return nil
+		}
+		return fmt.Errorf("a monthly wallet cannot self-transfer to another double scoped wallet (Global + Monthly)")
 	}
 	return fmt.Errorf("invalid loan source scope: %s", source.Scope)
 }
