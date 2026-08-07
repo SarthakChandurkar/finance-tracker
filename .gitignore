@@ -3,7 +3,7 @@ data.json
 
 # Temporary files
 *.tmp
-*.log
+logs/
 
 # Binaries
 *.exe
@@ -19,3 +19,4 @@ data.json
 *.swo
 
 .env
+.mailmap
