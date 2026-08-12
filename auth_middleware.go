@@ -12,10 +12,10 @@ const sessionCookieName = "session_token"
 // session, so a signed-out visitor can actually reach and submit the
 // login/register screens.
 var publicPaths = map[string]bool{
-	"/login.html":    true,
-	"/register.html": true,
-	"/api/login":     true,
-	"/api/register":  true,
+	"/login.html": true,
+	// "/register.html": true,
+	"/api/login": true,
+	// "/api/register":  true,
 }
 
 // publicAssetSuffixes lets static files the login/register pages depend
