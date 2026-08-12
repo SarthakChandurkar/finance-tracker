@@ -4,7 +4,7 @@ import { escapeHTML, toDateOnly, formatDate } from './utils.js';
 import {
   walletTableBody, transactionTableBody, categoryTableBody,
   loanLedger, interWalletLoanLedger, walletBreakdowns, categoryTotals,
-  taskList, todayTasksEl, txDestination
+  taskList, todayTasksEl, txDestination , loanLedger_settle, interWalletLoanLedger_settle
 } from './dom.js';
 
 export function buildSelectOptions(select, values, includeEmpty = true) {
@@ -79,7 +79,7 @@ export function renderLoanLedger(entries) {
   loanLedger.innerHTML = (entries || []).map((entry) => `
     <div class="loan-entry">
       <span>${entry.counterparty}: outstanding ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
-      <button class="settle-loan" data-counterparty="${entry.counterparty}">Settle</button>
+      <!-- <button class="settle-loan" data-counterparty="${entry.counterparty}">Settle</button> -->
     </div>
   `).join('');
 }
@@ -87,6 +87,31 @@ export function renderLoanLedger(entries) {
 export function renderInterWalletLoanLedger(entries) {
   if (!interWalletLoanLedger) return;
   interWalletLoanLedger.innerHTML = (entries || []).map((entry) => `
+    <div class="loan-entry">
+      <span>${entry.lender_wallet_name} &rarr; ${entry.borrower_wallet_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
+      <!-- <button class="settle-interwallet-loan"
+        data-lender-id="${entry.lender_wallet_id}"
+        data-lender-name="${entry.lender_wallet_name}"
+        data-borrower-id="${entry.borrower_wallet_id}"
+        data-borrower-name="${entry.borrower_wallet_name}">Settle</button> -->
+    </div>
+  `).join('');
+}
+
+
+export function renderLoanLedger_settle(entries) {
+  if (!loanLedger_settle) return;
+  loanLedger_settle.innerHTML = (entries || []).map((entry) => `
+    <div class="loan-entry">
+      <span>${entry.counterparty}: outstanding ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
+      <button class="settle-loan" data-counterparty="${entry.counterparty}">Settle</button>
+    </div>
+  `).join('');
+}
+
+export function renderInterWalletLoanLedger_settle(entries) {
+  if (!interWalletLoanLedger_settle) return;
+  interWalletLoanLedger_settle.innerHTML = (entries || []).map((entry) => `
     <div class="loan-entry">
       <span>${entry.lender_wallet_name} &rarr; ${entry.borrower_wallet_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
       <button class="settle-interwallet-loan"

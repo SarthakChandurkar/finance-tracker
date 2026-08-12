@@ -41,6 +41,11 @@ export const categoryTotals = document.getElementById('category-totals');
 export const loanLedger = document.getElementById('loan-ledger');
 export const interWalletLoanLedger = document.getElementById('interwallet-loan-ledger');
 
+// Loan Settle and Show Elements
+export const loanLedger_settle = document.getElementById('loan-ledger-settle');
+export const interWalletLoanLedger_settle = document.getElementById('interwallet-loan-ledger-settle');
+
+
 // Funding & Settlement Panels
 export const fundingPanel = document.getElementById('funding-panel');
 export const fundingMessage = document.getElementById('funding-message');

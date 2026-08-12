@@ -3,7 +3,7 @@
 import { fetchJSON, showToast } from './utils.js';
 import {
   renderWallets, renderCategories, renderTransactions,
-  renderLoanLedger, renderInterWalletLoanLedger, renderDashboard,
+  renderLoanLedger, renderInterWalletLoanLedger, renderLoanLedger_settle, renderInterWalletLoanLedger_settle, renderDashboard,
   renderTasks, renderTodayTasks, showTasksConnecting, buildSelectOptions,
   populateDestinationOptions
 } from './render.js';
@@ -168,6 +168,8 @@ export async function refreshData() {
     renderTransactions(currentTransactions, currentWallets);
     renderLoanLedger(loanEntries || []);
     renderInterWalletLoanLedger(interWalletLoanEntries || []);
+    renderLoanLedger_settle(loanEntries || []);
+    renderInterWalletLoanLedger_settle(interWalletLoanEntries || []);
     renderDashboard(walletTotals, categoryTotalsData);
     refreshWalletsAndCategoriesDropdowns();
   } catch (err) {

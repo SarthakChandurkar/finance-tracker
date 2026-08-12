@@ -10,7 +10,7 @@ import {
   interWalletSettleLabel, interWalletSettleAmount, interWalletSettleSend, 
   interWalletSettleCancel, systemStatus, monthEndButton, taskForm, taskTitleInput, 
   taskDueInput, deleteAllTasksBtn, confirmModal, confirmTitle, confirmMessage, 
-  confirmDetails, confirmYes, confirmNo 
+  confirmDetails, confirmYes, confirmNo
 } from './dom.js';
 
 import { showToast, setFormError, fetchJSON, normalizeFormNumbers, formatDate } from './utils.js';
