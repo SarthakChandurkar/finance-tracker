@@ -49,7 +49,12 @@ type apiServer struct {
 	loanService     *domain.LoanService
 	schedule        *domain.ScheduleService
 	tasks           *remote.TodoClient
+	authService     *domain.AuthService
 }
+
+// sessionTTLSeconds mirrors the session TTL configured in main() and is
+// used as the session cookie's MaxAge.
+var sessionTTLSeconds int
 
 func main() {
 
@@ -66,6 +71,17 @@ func main() {
 		todoServerURL = remote.DefaultTodoServerURL
 	}
 
+	sessionTTL := 20 * time.Minute
+	if raw := os.Getenv("SESSION_TTL_MINUTES"); raw != "" {
+		if mins, err := strconv.Atoi(raw); err == nil && mins > 0 {
+			sessionTTL = time.Duration(mins) * time.Minute
+		} else {
+			log.Printf("invalid SESSION_TTL_MINUTES=%q, using default of %s", raw, sessionTTL)
+		}
+	}
+	sessionTTLSeconds = int(sessionTTL.Seconds())
+	sessionStore := storage.NewSessionStore(rdb, sessionTTL)
+
 	server := &apiServer{
 		store:           store,
 		txService:       domain.NewTransactionService(store),
@@ -74,6 +90,7 @@ func main() {
 		loanService:     domain.NewLoanService(store),
 		schedule:        domain.NewScheduleService(store),
 		tasks:           remote.NewTodoClient(todoServerURL, remote.TodoServerTimeout),
+		authService:     domain.NewAuthService(store, sessionStore),
 	}
 
 	addr := os.Getenv("ADDR")
@@ -112,6 +129,10 @@ func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 func (s *apiServer) routes() http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/register", s.handleRegister)
+	mux.HandleFunc("/api/login", s.handleLogin)
+	mux.HandleFunc("/api/logout", s.handleLogout)
+
 	mux.HandleFunc("/api/status", s.handleStatus)
 
 	mux.HandleFunc("/api/wallets", s.handleWallets)
@@ -141,7 +162,7 @@ func (s *apiServer) routes() http.Handler {
 
 	mux.Handle("/", http.FileServer(http.Dir("ui")))
 
-	return loggingMiddleware(s.reloadMiddleware(mux))
+	return loggingMiddleware(s.reloadMiddleware(s.sessionMiddleware(mux)))
 }
 
 // Response Writing Functions

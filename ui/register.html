@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Register</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 360px; margin: 80px auto; }
+  input { display: block; width: 100%; margin-bottom: 12px; padding: 8px; box-sizing: border-box; }
+  button { width: 100%; padding: 10px; }
+  #error { color: #b00020; min-height: 1.2em; margin-bottom: 8px; }
+  small { color: #555; }
+</style>
+</head>
+<body>
+  <h1>Register</h1>
+  <div id="error"></div>
+  <form id="register-form">
+    <input type="text" name="username" placeholder="Username" autocomplete="username" required>
+    <input type="password" name="password" placeholder="Password" autocomplete="new-password" required>
+    <small>At least 8 characters, with an uppercase letter, lowercase letter, number, and punctuation. No sequences like "abc" or "123".</small>
+    <br><br>
+    <button type="submit">Register</button>
+  </form>
+  <p><a href="/login.html">Already have an account? Log in</a></p>
+
+  <script>
+    document.getElementById('register-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('error');
+      errorEl.textContent = '';
+      const form = new FormData(e.target);
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: form.get('username'),
+          password: form.get('password'),
+        }),
+      });
+      if (res.ok) {
+        window.location.href = '/login.html';
+        return;
+      }
+      errorEl.textContent = await res.text();
+    });
+  </script>
+</body>
+</html>

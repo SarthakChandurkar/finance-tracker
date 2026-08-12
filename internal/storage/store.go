@@ -31,16 +31,19 @@ type Data struct {
 	Transactions []models.Transaction `json:"transactions"`
 	Wallets      []models.Wallet      `json:"wallets"`
 	Categories   []models.Category    `json:"categories"`
+	Users        []models.User        `json:"users"`
 }
 
 const (
 	keyTxPrefix       = "tx:"
 	keyWalletPrefix   = "wallet:"
 	keyCategoryPrefix = "category:"
+	keyUserPrefix     = "user:"
 
 	idxTransactions = "idx:transactions"
 	idxWallets      = "idx:wallets"
 	idxCategories   = "idx:categories"
+	idxUsers        = "idx:users"
 )
 
 type Identifiable interface {
@@ -56,6 +59,7 @@ var (
 	txCollection       = entityCollection[models.Transaction]{idxKey: idxTransactions, prefix: keyTxPrefix}
 	walletCollection   = entityCollection[models.Wallet]{idxKey: idxWallets, prefix: keyWalletPrefix}
 	categoryCollection = entityCollection[models.Category]{idxKey: idxCategories, prefix: keyCategoryPrefix}
+	userCollection     = entityCollection[models.User]{idxKey: idxUsers, prefix: keyUserPrefix}
 )
 
 func (c entityCollection[T]) load(ctx context.Context, rdb *redis.Client) ([]T, error) {
@@ -179,11 +183,16 @@ func (s *Store) Load() error {
 	if err != nil {
 		return fmt.Errorf("loading categories: %w", err)
 	}
+	users, err := userCollection.load(s.ctx, s.rdb)
+	if err != nil {
+		return fmt.Errorf("loading users: %w", err)
+	}
 
 	s.data = Data{
 		Transactions: txs,
 		Wallets:      wallets,
 		Categories:   categories,
+		Users:        users,
 	}
 	return nil
 }
@@ -192,6 +201,7 @@ type dataSnapshot struct {
 	transactions []byte
 	wallets      []byte
 	categories   []byte
+	users        []byte
 }
 
 func snapshotJSON(d Data) (dataSnapshot, error) {
@@ -205,6 +215,9 @@ func snapshotJSON(d Data) (dataSnapshot, error) {
 	}
 	if snap.categories, err = json.Marshal(d.Categories); err != nil {
 		return snap, fmt.Errorf("snapshotting categories: %w", err)
+	}
+	if snap.users, err = json.Marshal(d.Users); err != nil {
+		return snap, fmt.Errorf("snapshotting users: %w", err)
 	}
 	return snap, nil
 }
@@ -246,6 +259,11 @@ func (s *Store) saveChanged(before dataSnapshot) error {
 	}
 	if changed, err := queueIfChanged(s.ctx, s.rdb, pipe, categoryCollection, before.categories, s.data.Categories); err != nil {
 		return fmt.Errorf("syncing categories: %w", err)
+	} else if changed {
+		touched = true
+	}
+	if changed, err := queueIfChanged(s.ctx, s.rdb, pipe, userCollection, before.users, s.data.Users); err != nil {
+		return fmt.Errorf("syncing users: %w", err)
 	} else if changed {
 		touched = true
 	}

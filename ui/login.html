@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Log in</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 360px; margin: 80px auto; }
+  input { display: block; width: 100%; margin-bottom: 12px; padding: 8px; box-sizing: border-box; }
+  button { width: 100%; padding: 10px; }
+  #error { color: #b00020; min-height: 1.2em; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+  <h1>Log in</h1>
+  <div id="error"></div>
+  <form id="login-form">
+    <input type="text" name="username" placeholder="Username" autocomplete="username" required>
+    <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit">Log in</button>
+  </form>
+  <p><a href="/register.html">Need an account? Register</a></p>
+
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('error');
+      errorEl.textContent = '';
+      const form = new FormData(e.target);
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: form.get('username'),
+          password: form.get('password'),
+        }),
+      });
+      if (res.ok) {
+        window.location.href = '/';
+        return;
+      }
+      errorEl.textContent = await res.text();
+    });
+  </script>
+</body>
+</html>
