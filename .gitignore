@@ -19,4 +19,8 @@ logs/
 *.swo
 
 .env
-.mailmap
+
+
+# Docker files
+docker-compose.override.yml
+Dockerfile
