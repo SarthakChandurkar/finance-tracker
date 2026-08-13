@@ -21,6 +21,7 @@ const SavingsWalletID = "savings"
 
 type Wallet struct {
 	ID                  string      `json:"id"`
+	UserID              string      `json:"user_id"`
 	Name                string      `json:"name"`
 	Scope               WalletScope `json:"scope"`
 	LinkedWalletID      string      `json:"linked_wallet_id,omitempty"`
@@ -57,6 +58,14 @@ func (q Wallet) GoalProgress(accumulated float64) float64 {
 
 func (q Wallet) GetID() string {
 	return q.ID
+}
+
+// OwnerID identifies which user this wallet belongs to. Storage uses this
+// to keep two different users' wallets from colliding when they share the
+// same literal ID (e.g. every user's default Savings wallet has
+// ID "savings").
+func (q Wallet) OwnerID() string {
+	return q.UserID
 }
 
 func (q *Wallet) ApplyDefaults(savingsID string) {

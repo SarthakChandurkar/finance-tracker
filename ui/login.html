@@ -18,9 +18,19 @@
     <input type="password" name="password" placeholder="Password" autocomplete="current-password" required>
     <button type="submit">Log in</button>
   </form>
-  <!-- <p><a href="/register.html">Need an account? Register</a></p> -->
+  <p><a href="/register.html">Need an account? Register</a></p>
 
   <script>
+    // If this page is shown via the browser's back/forward cache
+    // (bfcache), no request ever reaches the server, so its
+    // already-logged-in redirect never gets a chance to run. Forcing a
+    // reload here re-triggers that server-side check.
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) {
+        window.location.reload();
+      }
+    });
+
     document.getElementById('login-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const errorEl = document.getElementById('error');
@@ -35,6 +45,11 @@
         }),
       });
       if (res.ok) {
+        window.location.href = '/';
+        return;
+      }
+      if (res.status === 409) {
+        // A session is already active - go home instead of showing an error.
         window.location.href = '/';
         return;
       }

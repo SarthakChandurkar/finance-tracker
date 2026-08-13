@@ -9,10 +9,10 @@ import (
 )
 
 type WalletService struct {
-	store *storage.Store
+	store storage.DataStore
 }
 
-func NewWalletService(store *storage.Store) *WalletService {
+func NewWalletService(store storage.DataStore) *WalletService {
 	return &WalletService{store: store}
 }
 

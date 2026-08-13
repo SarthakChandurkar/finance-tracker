@@ -42,14 +42,40 @@ func init() {
 }
 
 type apiServer struct {
-	store           *storage.Store
-	txService       *domain.TransactionService
-	walletService   *domain.WalletService
-	categoryService *domain.CategoryService
-	loanService     *domain.LoanService
-	schedule        *domain.ScheduleService
-	tasks           *remote.TodoClient
-	authService     *domain.AuthService
+	store       *storage.Store
+	tasks       *remote.TodoClient
+	authService *domain.AuthService
+}
+
+// userServices bundles the five domain services, all built against the
+// same request-scoped UserScopedStore, so a handler sees and can only
+// touch the authenticated user's own transactions/wallets/categories.
+type userServices struct {
+	store      storage.DataStore
+	tx         *domain.TransactionService
+	wallets    *domain.WalletService
+	categories *domain.CategoryService
+	loans      *domain.LoanService
+	schedule   *domain.ScheduleService
+}
+
+// forUser resolves the authenticated user from the request context (set
+// by sessionMiddleware) and builds a fresh set of services scoped to
+// that user's own data. Every data-touching handler calls this first.
+func (s *apiServer) forUser(r *http.Request) (userServices, error) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		return userServices{}, fmt.Errorf("no authenticated user in request context")
+	}
+	scoped := storage.NewUserScopedStore(s.store, userID)
+	return userServices{
+		store:      scoped,
+		tx:         domain.NewTransactionService(scoped),
+		wallets:    domain.NewWalletService(scoped),
+		categories: domain.NewCategoryService(scoped),
+		loans:      domain.NewLoanService(scoped),
+		schedule:   domain.NewScheduleService(scoped),
+	}, nil
 }
 
 // sessionTTLSeconds mirrors the session TTL configured in main() and is
@@ -83,14 +109,9 @@ func main() {
 	sessionStore := storage.NewSessionStore(rdb, sessionTTL)
 
 	server := &apiServer{
-		store:           store,
-		txService:       domain.NewTransactionService(store),
-		walletService:   domain.NewWalletService(store),
-		categoryService: domain.NewCategoryService(store),
-		loanService:     domain.NewLoanService(store),
-		schedule:        domain.NewScheduleService(store),
-		tasks:           remote.NewTodoClient(todoServerURL, remote.TodoServerTimeout),
-		authService:     domain.NewAuthService(store, sessionStore),
+		store:       store,
+		tasks:       remote.NewTodoClient(todoServerURL, remote.TodoServerTimeout),
+		authService: domain.NewAuthService(store, sessionStore),
 	}
 
 	addr := os.Getenv("ADDR")
@@ -132,6 +153,7 @@ func (s *apiServer) routes() http.Handler {
 	// mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/account", s.handleAccount)
 
 	mux.HandleFunc("/api/status", s.handleStatus)
 
@@ -160,9 +182,24 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("/api/tasks", s.handleTasks)
 	mux.HandleFunc("/api/tasks/", s.handleTaskbyID)
 
-	mux.Handle("/", http.FileServer(http.Dir("ui")))
+	mux.Handle("/", noCacheFileServer("ui"))
 
 	return loggingMiddleware(s.reloadMiddleware(s.sessionMiddleware(mux)))
+}
+
+// noCacheFileServer wraps a static file server so every response tells
+// the browser not to cache it. Without this, a browser can silently
+// reuse a previously cached copy of index.html/login.html on a plain
+// navigation - meaning no request ever reaches the server, so
+// sessionMiddleware's auth/redirect check never gets a chance to run.
+// Forcing revalidation on every load guarantees that check always fires.
+func noCacheFileServer(root string) http.Handler {
+	fs := http.FileServer(http.Dir(root))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		fs.ServeHTTP(w, r)
+	})
 }
 
 // Response Writing Functions
@@ -204,9 +241,14 @@ func (s *apiServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 // ************************************ Handler Methods for Wallets ************************************************
 
 func (s *apiServer) handleTransactions(w http.ResponseWriter, r *http.Request) {
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		s.store.View(func(d storage.Data) {
+		svc.store.View(func(d storage.Data) {
 			writeJSON(w, http.StatusOK, d.Transactions)
 		})
 	case http.MethodPost:
@@ -215,7 +257,7 @@ func (s *apiServer) handleTransactions(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		saved, err := s.txService.RecordTransaction(req)
+		saved, err := svc.tx.RecordTransaction(req)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -231,6 +273,11 @@ func (s *apiServer) handleTransactionByID(w http.ResponseWriter, r *http.Request
 		http.NotFound(w, r)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	id := path.Base(r.URL.Path)
 	switch r.Method {
 	case http.MethodPut:
@@ -239,14 +286,14 @@ func (s *apiServer) handleTransactionByID(w http.ResponseWriter, r *http.Request
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		saved, err := s.txService.EditTransaction(id, req)
+		saved, err := svc.tx.EditTransaction(id, req)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)
 	case http.MethodDelete:
-		if err := s.txService.DeleteTransaction(id); err != nil {
+		if err := svc.tx.DeleteTransaction(id); err != nil {
 			writeAPIError(w, err)
 			return
 		}
@@ -259,9 +306,14 @@ func (s *apiServer) handleTransactionByID(w http.ResponseWriter, r *http.Request
 // **************************** Handler Methods for Categories ************************************************
 
 func (s *apiServer) handleWallets(w http.ResponseWriter, r *http.Request) {
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		s.store.View(func(d storage.Data) {
+		svc.store.View(func(d storage.Data) {
 			writeJSON(w, http.StatusOK, d.Wallets)
 		})
 	case http.MethodPost:
@@ -276,7 +328,7 @@ func (s *apiServer) handleWallets(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		created, err := s.walletService.CreateWallet(req.Mode, req.Name, req.TargetAmount, req.EOMSweepDestination)
+		created, err := svc.wallets.CreateWallet(req.Mode, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -292,31 +344,36 @@ func (s *apiServer) handleWalletBreakdowns(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	scope := r.URL.Query().Get("scope")
 	now := time.Now()
 
 	switch scope {
 	case "", "all":
-		monthly, err := s.walletService.AllMonthlyBreakdowns(now)
+		monthly, err := svc.wallets.AllMonthlyBreakdowns(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
-		global, err := s.walletService.AllGlobalBreakdowns()
+		global, err := svc.wallets.AllGlobalBreakdowns()
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"monthly": monthly, "global": global})
 	case "monthly":
-		monthly, err := s.walletService.AllMonthlyBreakdowns(now)
+		monthly, err := svc.wallets.AllMonthlyBreakdowns(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, monthly)
 	case "global":
-		global, err := s.walletService.AllGlobalBreakdowns()
+		global, err := svc.wallets.AllGlobalBreakdowns()
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -332,6 +389,11 @@ func (s *apiServer) handleWalletByID(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	id := path.Base(r.URL.Path)
 	switch r.Method {
 	case http.MethodPut:
@@ -345,14 +407,14 @@ func (s *apiServer) handleWalletByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		saved, err := s.walletService.UpdateWallet(id, req.Name, req.TargetAmount, req.EOMSweepDestination)
+		saved, err := svc.wallets.UpdateWallet(id, req.Name, req.TargetAmount, req.EOMSweepDestination)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, saved)
 	case http.MethodDelete:
-		saved, err := s.walletService.DeleteWallet(id)
+		saved, err := svc.wallets.DeleteWallet(id)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -366,9 +428,14 @@ func (s *apiServer) handleWalletByID(w http.ResponseWriter, r *http.Request) {
 // **************************** Handler Methods for Categories ************************************************
 
 func (s *apiServer) handleCategories(w http.ResponseWriter, r *http.Request) {
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
-		s.store.View(func(d storage.Data) {
+		svc.store.View(func(d storage.Data) {
 			writeJSON(w, http.StatusOK, d.Categories)
 		})
 	case http.MethodPost:
@@ -379,7 +446,7 @@ func (s *apiServer) handleCategories(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		category, err := s.categoryService.CreateCategory(req.Name)
+		category, err := svc.categories.CreateCategory(req.Name)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -395,31 +462,36 @@ func (s *apiServer) handleCategoryTotals(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	scope := r.URL.Query().Get("scope")
 	now := time.Now()
 
 	switch scope {
 	case "", "all":
-		monthly, err := s.categoryService.MonthlyTotals(now)
+		monthly, err := svc.categories.MonthlyTotals(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
-		global, err := s.categoryService.GlobalTotals()
+		global, err := svc.categories.GlobalTotals()
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"monthly": monthly, "global": global})
 	case "monthly":
-		monthly, err := s.categoryService.MonthlyTotals(now)
+		monthly, err := svc.categories.MonthlyTotals(now)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, monthly)
 	case "global":
-		global, err := s.categoryService.GlobalTotals()
+		global, err := svc.categories.GlobalTotals()
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -435,11 +507,16 @@ func (s *apiServer) handleCategoryByID(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	id := path.Base(r.URL.Path)
 	switch r.Method {
 
 	case http.MethodGet:
-		category, err := s.categoryService.GetCategoryByID(id)
+		category, err := svc.categories.GetCategoryByID(id)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -454,14 +531,14 @@ func (s *apiServer) handleCategoryByID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 			return
 		}
-		updated, err := s.categoryService.RenameCategory(id, req.Name)
+		updated, err := svc.categories.RenameCategory(id, req.Name)
 		if err != nil {
 			writeAPIError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, updated)
 	case http.MethodDelete:
-		deleted, err := s.categoryService.DeleteCategory(id)
+		deleted, err := svc.categories.DeleteCategory(id)
 		if err != nil {
 			writeAPIError(w, err)
 			return
@@ -477,6 +554,11 @@ func (s *apiServer) handleCategoryRecategorize(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	var req struct {
 		SourceCategoryID string `json:"source_category_id"`
 		DestCategoryID   string `json:"dest_category_id"`
@@ -485,7 +567,7 @@ func (s *apiServer) handleCategoryRecategorize(w http.ResponseWriter, r *http.Re
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	if err := s.categoryService.Recategorize(req.SourceCategoryID, req.DestCategoryID); err != nil {
+	if err := svc.categories.Recategorize(req.SourceCategoryID, req.DestCategoryID); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -499,8 +581,13 @@ func (s *apiServer) handleScheduleEnd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	now := time.Now()
-	if err := s.schedule.RunMonthEndSweep(now); err != nil {
+	if err := svc.schedule.RunMonthEndSweep(now); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -514,6 +601,11 @@ func (s *apiServer) handleFundingOptions(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	walletID := r.URL.Query().Get("wallet_id")
 	amountParam := r.URL.Query().Get("amount")
 	if walletID == "" || amountParam == "" {
@@ -525,7 +617,7 @@ func (s *apiServer) handleFundingOptions(w http.ResponseWriter, r *http.Request)
 		http.Error(w, fmt.Sprintf("invalid amount: %v", err), http.StatusBadRequest)
 		return
 	}
-	options, err := s.txService.EligibleFundingOptions(walletID, amount, time.Now())
+	options, err := svc.tx.EligibleFundingOptions(walletID, amount, time.Now())
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -536,6 +628,11 @@ func (s *apiServer) handleFundingOptions(w http.ResponseWriter, r *http.Request)
 func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 	var req struct {
@@ -578,7 +675,7 @@ func (s *apiServer) handleFundingRemediation(w http.ResponseWriter, r *http.Requ
 		Date:              date,
 		Details:           req.Details,
 	}
-	fundingTx, debitTx, err := s.txService.FundAndCreateDebit(funding, debit)
+	fundingTx, debitTx, err := svc.tx.FundAndCreateDebit(funding, debit)
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -593,7 +690,12 @@ func (s *apiServer) handleLoanLedger(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	entries, err := s.loanService.CounterpartyLedger()
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	entries, err := svc.loans.CounterpartyLedger()
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -606,7 +708,12 @@ func (s *apiServer) handleInterWalletLoans(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	entries, err := s.loanService.AllInterWalletLoans()
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
+	entries, err := svc.loans.AllInterWalletLoans()
 	if err != nil {
 		writeAPIError(w, err)
 		return
@@ -619,6 +726,11 @@ func (s *apiServer) handleSettleInterWalletLoan(w http.ResponseWriter, r *http.R
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	svc, err := s.forUser(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnauthorized)
+		return
+	}
 	var req struct {
 		BorrowerWalletID string  `json:"borrower_wallet_id"`
 		LenderWalletID   string  `json:"lender_wallet_id"`
@@ -628,7 +740,7 @@ func (s *apiServer) handleSettleInterWalletLoan(w http.ResponseWriter, r *http.R
 		http.Error(w, fmt.Sprintf("invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	saved, err := s.loanService.SettleInterWalletLoan(req.BorrowerWalletID, req.LenderWalletID, req.Amount, time.Now())
+	saved, err := svc.loans.SettleInterWalletLoan(req.BorrowerWalletID, req.LenderWalletID, req.Amount, time.Now())
 	if err != nil {
 		writeAPIError(w, err)
 		return

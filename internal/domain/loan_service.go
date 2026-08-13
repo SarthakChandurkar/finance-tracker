@@ -17,10 +17,10 @@ type LoanLedgerEntry struct {
 }
 
 type LoanService struct {
-	store *storage.Store
+	store storage.DataStore
 }
 
-func NewLoanService(store *storage.Store) *LoanService {
+func NewLoanService(store storage.DataStore) *LoanService {
 	return &LoanService{store: store}
 }
 

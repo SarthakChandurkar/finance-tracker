@@ -99,6 +99,22 @@ func (c entityCollection[T]) load(ctx context.Context, rdb *redis.Client) ([]T, 
 	return result, nil
 }
 
+// storageKey returns the Redis key suffix for an item: normally just its
+// own ID. If the item also reports an owning user (via an OwnerID()
+// method - Wallet, Category, and Transaction all have one), the owner is
+// folded into the key instead. This is what lets two different users'
+// records collide on the same literal ID without overwriting each other
+// in Redis - notably, every user's default Savings wallet ("savings")
+// and default Settled category ("settled") share that same ID by design.
+func storageKey[T Identifiable](item T) string {
+	if owned, ok := any(item).(interface{ OwnerID() string }); ok {
+		if owner := owned.OwnerID(); owner != "" {
+			return owner + ":" + item.GetID()
+		}
+	}
+	return item.GetID()
+}
+
 func (c entityCollection[T]) queueSync(ctx context.Context, rdb *redis.Client, pipe redis.Pipeliner, items []T) error {
 	oldIDs, err := rdb.SMembers(ctx, c.idxKey).Result()
 	if err != nil {
@@ -111,7 +127,7 @@ func (c entityCollection[T]) queueSync(ctx context.Context, rdb *redis.Client, p
 
 	newIDs := make([]string, 0, len(items))
 	for _, item := range items {
-		id := item.GetID()
+		id := storageKey(item)
 		newIDs = append(newIDs, id)
 		delete(oldSet, id)
 

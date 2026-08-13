@@ -78,6 +78,7 @@ const DefaultCategory = "Settled"
 
 type Transaction struct {
 	ID                  string            `json:"id"`
+	UserID              string            `json:"user_id"`
 	Type                TransactionType   `json:"type"`
 	Amount              float64           `json:"amount"`
 	SourceWalletID      string            `json:"source_wallet_id,omitempty"`
@@ -115,6 +116,11 @@ func (tx Transaction) BalanceEffect() BalanceEffect {
 
 func (tx Transaction) GetID() string {
 	return tx.ID
+}
+
+// OwnerID identifies which user this transaction belongs to.
+func (tx Transaction) OwnerID() string {
+	return tx.UserID
 }
 
 func (tx *Transaction) ApplyDefaults() {

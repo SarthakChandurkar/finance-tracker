@@ -17,15 +17,27 @@
           <span></span>
         </button>
       </div>
-      <nav>
-        <button data-view="dashboard" class="active">Dashboard</button>
-        <button data-view="transactions">Transactions</button>
-        <button data-view="wallets">Wallets</button>
-        <button data-view="loan-ledger">Loan-Ledger</button>
-        <button data-view="categories">Categories</button>
-        <button data-view="tasks">Tasks</button>
-        <button data-view="system">System Actions</button>
-      </nav>
+      <div class="header-controls">
+        <nav>
+          <button data-view="dashboard" class="active">Dashboard</button>
+          <button data-view="transactions">Transactions</button>
+          <button data-view="wallets">Wallets</button>
+          <button data-view="loan-ledger">Loan-Ledger</button>
+          <button data-view="categories">Categories</button>
+          <button data-view="tasks">Tasks</button>
+          <button data-view="system">System Actions</button>
+        </nav>
+
+        <div class="profile-menu">
+          <button id="profile-toggle" class="profile-btn" type="button" aria-haspopup="true" aria-expanded="false">
+            <span id="profile-username">Account</span>
+            <span class="profile-caret" aria-hidden="true">&#9662;</span>
+          </button>
+          <div id="profile-dropdown" class="profile-dropdown hidden">
+            <button id="profile-logout" type="button">Logout</button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <main>

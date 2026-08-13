@@ -10,7 +10,8 @@ import {
   interWalletSettleLabel, interWalletSettleAmount, interWalletSettleSend, 
   interWalletSettleCancel, systemStatus, monthEndButton, taskForm, taskTitleInput, 
   taskDueInput, deleteAllTasksBtn, confirmModal, confirmTitle, confirmMessage, 
-  confirmDetails, confirmYes, confirmNo
+  confirmDetails, confirmYes, confirmNo, profileToggle, profileDropdown, 
+  profileUsername, profileLogout
 } from './dom.js';
 
 import { showToast, setFormError, fetchJSON, normalizeFormNumbers, formatDate } from './utils.js';
@@ -56,6 +57,41 @@ navButtons.forEach((button) => button.addEventListener('click', () => {
 hamburgerToggle && hamburgerToggle.addEventListener('click', () => {
   if (navMenu) navMenu.classList.toggle('open');
 });
+
+// --- Profile Menu ---
+function closeProfileDropdown() {
+  if (!profileDropdown) return;
+  profileDropdown.classList.add('hidden');
+  if (profileToggle) profileToggle.setAttribute('aria-expanded', 'false');
+}
+
+profileToggle && profileToggle.addEventListener('click', (event) => {
+  event.stopPropagation();
+  if (!profileDropdown) return;
+  const isOpen = !profileDropdown.classList.contains('hidden');
+  profileDropdown.classList.toggle('hidden', isOpen);
+  profileToggle.setAttribute('aria-expanded', String(!isOpen));
+});
+
+document.addEventListener('click', (event) => {
+  if (!profileDropdown || profileDropdown.classList.contains('hidden')) return;
+  if (event.target.closest('.profile-menu')) return;
+  closeProfileDropdown();
+});
+
+profileLogout && profileLogout.addEventListener('click', () => {
+  closeProfileDropdown();
+  fetchJSON('/api/logout', { method: 'POST' })
+    .then(() => { window.location.href = '/login.html'; })
+    .catch((err) => showToast(err.message || 'Failed to log out', 'error'));
+});
+
+function loadProfile() {
+  if (!profileUsername) return;
+  fetchJSON('/api/account')
+    .then((user) => { profileUsername.textContent = (user && user.username) || 'Account'; })
+    .catch(() => { /* not fatal - leave the default label in place */ });
+}
 
 // --- Form UI Logic ---
 function updateTransactionFormFields() {
@@ -527,6 +563,7 @@ function init() {
   
   updateTransactionFormFields();
   updateWalletFormFields();
+  loadProfile();
   refreshData();
   refreshTasks();
 }

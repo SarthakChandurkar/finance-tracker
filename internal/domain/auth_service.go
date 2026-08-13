@@ -19,6 +19,7 @@ var (
 	ErrUsernameTaken      = errors.New("username is already taken")
 	ErrUsernameRequired   = errors.New("username is required")
 	ErrInvalidCredentials = errors.New("invalid username or password")
+	ErrUserNotFound       = errors.New("user not found")
 )
 
 const minPasswordLength = 8
@@ -83,6 +84,20 @@ func (a *AuthService) Register(ctx context.Context, username, password string) (
 			CreatedAt:    time.Now().UTC(),
 		}
 		d.Users = append(d.Users, created)
+
+		// Every user gets their own starting Savings wallet and Settled
+		// category, matching what used to be seeded once globally.
+		// Both intentionally reuse the same literal ID across users
+		// ("savings" / "settled") - storage.go namespaces the Redis key
+		// by owner precisely so that's safe.
+		defaultWallet := models.NewSavingsWallet()
+		defaultWallet.UserID = created.ID
+		d.Wallets = append(d.Wallets, defaultWallet)
+
+		defaultCategory := models.NewSettledCategory()
+		defaultCategory.UserID = created.ID
+		d.Categories = append(d.Categories, defaultCategory)
+
 		return nil
 	})
 	if err != nil {
@@ -113,7 +128,7 @@ func (a *AuthService) Login(ctx context.Context, username, password string) (tok
 		return "", ErrInvalidCredentials
 	}
 
-	return a.sessions.Create(ctx, match.Username)
+	return a.sessions.Create(ctx, match.ID)
 }
 
 // Logout ends the session tied to token. Safe to call with an empty or
@@ -122,15 +137,82 @@ func (a *AuthService) Logout(ctx context.Context, token string) error {
 	return a.sessions.Destroy(ctx, token)
 }
 
-// CurrentUser returns the username tied to a session token, if the
+// CurrentUser returns the ID of the user tied to a session token, if the
 // session is still valid. This also slides the session's idle-expiry
 // window forward, since a lookup means the user is active right now.
-func (a *AuthService) CurrentUser(ctx context.Context, token string) (username string, ok bool) {
-	username, ok, err := a.sessions.Username(ctx, token)
+func (a *AuthService) CurrentUser(ctx context.Context, token string) (userID string, ok bool) {
+	userID, ok, err := a.sessions.UserID(ctx, token)
 	if err != nil {
 		return "", false
 	}
-	return username, ok
+	return userID, ok
+}
+
+// GetUser returns the account tied to userID, if it still exists.
+func (a *AuthService) GetUser(userID string) (models.User, bool) {
+	var found models.User
+	var ok bool
+	a.store.View(func(d storage.Data) {
+		for _, u := range d.Users {
+			if u.ID == userID {
+				found, ok = u, true
+				return
+			}
+		}
+	})
+	return found, ok
+}
+
+// DeleteAccount permanently removes userID's account along with every
+// wallet, category, and transaction they own, then ends the session tied
+// to token. This is irreversible - there is no per-user data left behind
+// for anyone else to see once this returns.
+func (a *AuthService) DeleteAccount(ctx context.Context, userID, token string) error {
+	err := a.store.Update(func(d *storage.Data) error {
+		users := make([]models.User, 0, len(d.Users))
+		found := false
+		for _, u := range d.Users {
+			if u.ID == userID {
+				found = true
+				continue
+			}
+			users = append(users, u)
+		}
+		if !found {
+			return ErrUserNotFound
+		}
+		d.Users = users
+
+		wallets := make([]models.Wallet, 0, len(d.Wallets))
+		for _, w := range d.Wallets {
+			if w.UserID != userID {
+				wallets = append(wallets, w)
+			}
+		}
+		d.Wallets = wallets
+
+		categories := make([]models.Category, 0, len(d.Categories))
+		for _, c := range d.Categories {
+			if c.UserID != userID {
+				categories = append(categories, c)
+			}
+		}
+		d.Categories = categories
+
+		transactions := make([]models.Transaction, 0, len(d.Transactions))
+		for _, tx := range d.Transactions {
+			if tx.UserID != userID {
+				transactions = append(transactions, tx)
+			}
+		}
+		d.Transactions = transactions
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return a.sessions.Destroy(ctx, token)
 }
 
 func newUserID() (string, error) {

@@ -59,6 +59,10 @@ func (s *apiServer) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if _, ok := s.currentUserID(r); ok {
+		http.Error(w, "already logged in - log out first", http.StatusConflict)
+		return
+	}
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -90,6 +94,39 @@ func (s *apiServer) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
 }
 
+func (s *apiServer) handleAccount(w http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		user, ok := s.authService.GetUser(userID)
+		if !ok {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"id":       user.ID,
+			"username": user.Username,
+		})
+	case http.MethodDelete:
+		var token string
+		if cookie, err := r.Cookie(sessionCookieName); err == nil {
+			token = cookie.Value
+		}
+		if err := s.authService.DeleteAccount(r.Context(), userID, token); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+		http.SetCookie(w, sessionCookie("", -1))
+		writeJSON(w, http.StatusOK, map[string]string{"status": "account deleted"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func writeAuthError(w http.ResponseWriter, err error) {
 	var policyErr *domain.PasswordPolicyError
 	switch {
@@ -101,6 +138,8 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	case errors.Is(err, domain.ErrInvalidCredentials):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
+	case errors.Is(err, domain.ErrUserNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
 	default:
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

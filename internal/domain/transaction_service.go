@@ -9,10 +9,10 @@ import (
 )
 
 type TransactionService struct {
-	store *storage.Store
+	store storage.DataStore
 }
 
-func NewTransactionService(store *storage.Store) *TransactionService {
+func NewTransactionService(store storage.DataStore) *TransactionService {
 	return &TransactionService{store: store}
 }
 

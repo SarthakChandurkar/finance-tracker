@@ -5,6 +5,12 @@ export const navButtons = document.querySelectorAll('nav button');
 export const navMenu = document.querySelector('nav');
 export const hamburgerToggle = document.getElementById('hamburger-toggle');
 
+// Profile Menu
+export const profileToggle = document.getElementById('profile-toggle');
+export const profileDropdown = document.getElementById('profile-dropdown');
+export const profileUsername = document.getElementById('profile-username');
+export const profileLogout = document.getElementById('profile-logout');
+
 // Transaction Form Elements
 export const txType = document.getElementById('tx-type');
 export const txSource = document.getElementById('tx-source');

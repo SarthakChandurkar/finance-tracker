@@ -9,10 +9,10 @@ import (
 )
 
 type ScheduleService struct {
-	store *storage.Store
+	store storage.DataStore
 }
 
-func NewScheduleService(store *storage.Store) *ScheduleService {
+func NewScheduleService(store storage.DataStore) *ScheduleService {
 	return &ScheduleService{store: store}
 }
 

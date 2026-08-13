@@ -25,25 +25,25 @@ func NewSessionStore(rdb *redis.Client, ttl time.Duration) *SessionStore {
 	return &SessionStore{rdb: rdb, ttl: ttl}
 }
 
-// Create starts a new session for username and returns the opaque token
+// Create starts a new session for userID and returns the opaque token
 // that should be stored in the client's session cookie.
-func (s *SessionStore) Create(ctx context.Context, username string) (string, error) {
+func (s *SessionStore) Create(ctx context.Context, userID string) (string, error) {
 	token, err := newSessionToken()
 	if err != nil {
 		return "", err
 	}
-	if err := s.rdb.Set(ctx, sessionKeyPrefix+token, username, s.ttl).Err(); err != nil {
+	if err := s.rdb.Set(ctx, sessionKeyPrefix+token, userID, s.ttl).Err(); err != nil {
 		return "", err
 	}
 	return token, nil
 }
 
-// Username returns the username tied to token, if the session is still
+// UserID returns the user ID tied to token, if the session is still
 // valid. Any successful lookup counts as activity and slides the idle
 // expiry window forward by ttl - this is what gives the "log in again
 // only after being idle" behavior. ok is false if the token is empty,
 // unknown, or has already expired.
-func (s *SessionStore) Username(ctx context.Context, token string) (username string, ok bool, err error) {
+func (s *SessionStore) UserID(ctx context.Context, token string) (userID string, ok bool, err error) {
 	if token == "" {
 		return "", false, nil
 	}

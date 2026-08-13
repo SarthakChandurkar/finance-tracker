@@ -9,10 +9,10 @@ import (
 )
 
 type CategoryService struct {
-	store *storage.Store
+	store storage.DataStore
 }
 
-func NewCategoryService(store *storage.Store) *CategoryService {
+func NewCategoryService(store storage.DataStore) *CategoryService {
 	return &CategoryService{store: store}
 }
 
