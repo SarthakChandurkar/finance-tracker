@@ -150,7 +150,7 @@ func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 func (s *apiServer) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// mux.HandleFunc("/api/register", s.handleRegister)
+	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/account", s.handleAccount)
