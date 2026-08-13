@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Finance Tracker</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -11,23 +11,9 @@
     <header>
       <div class="header-left">
         <h1>Finance Tracker</h1>
-        <button id="hamburger-toggle" class="hamburger" type="button" aria-label="Toggle menu">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
       </div>
-      <div class="header-controls">
-        <nav>
-          <button data-view="dashboard" class="active">Dashboard</button>
-          <button data-view="transactions">Transactions</button>
-          <button data-view="wallets">Wallets</button>
-          <button data-view="loan-ledger">Loan-Ledger</button>
-          <button data-view="categories">Categories</button>
-          <button data-view="tasks">Tasks</button>
-          <button data-view="system">System Actions</button>
-        </nav>
-
+      <!-- Moved to independent container to fix mobile clipping -->
+      <div class="header-right">
         <div class="profile-menu">
           <button id="profile-toggle" class="profile-btn" type="button" aria-haspopup="true" aria-expanded="false">
             <span id="profile-username">Account</span>
@@ -37,8 +23,24 @@
             <button id="profile-logout" type="button">Logout</button>
           </div>
         </div>
+        <button id="hamburger-toggle" class="hamburger" type="button" aria-label="Toggle menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
       </div>
     </header>
+    
+    <!-- Extracted Nav so it perfectly drops down natively below header on mobile -->
+    <nav id="main-nav">
+      <button data-view="dashboard" class="active">Dashboard</button>
+      <button data-view="transactions">Transactions</button>
+      <button data-view="wallets">Wallets</button>
+      <button data-view="loan-ledger">Loan-Ledger</button>
+      <button data-view="categories">Categories</button>
+      <button data-view="tasks">Tasks</button>
+      <button data-view="system">System Actions</button>
+    </nav>
 
     <main>
       <section id="dashboard" class="view active">
@@ -58,10 +60,14 @@
           </div>
           <div class="card">
             <h3>Loan Ledger</h3>
-            <h4>External Loans</h4>
-            <div id="loan-ledger"></div>
-            <h4>Inter-Wallet Loans</h4>
-            <div id="interwallet-loan-ledger"></div>
+            <div class="dashboard-section mt-1">
+              <h4 class="section-title">External Loans</h4>
+              <div id="loan-ledger"></div>
+            </div>
+            <div class="dashboard-section mt-3">
+              <h4 class="section-title">Inter-Wallet Loans</h4>
+              <div id="interwallet-loan-ledger"></div>
+            </div>
           </div>
         </div>
       </section>
@@ -69,9 +75,10 @@
       <section id="loan-ledger" class="view">
         <h2>Loan Ledger</h2>
         <div class="panel">
-          <h3>External Loans</h3>
+          <h3 class="section-title">External Loans</h3>
           <div id="loan-ledger-settle"></div>
-          <h3>Inter-Wallet Loans</h3>
+          
+          <h3 class="section-title mt-4">Inter-Wallet Loans</h3>
           <div id="interwallet-loan-ledger-settle"></div>
         </div>
       </section>
@@ -136,7 +143,7 @@
             </div>
             <div class="full-width actions">
               <button id="tx-submit" type="submit">Save Transaction</button>
-              <button id="tx-cancel" type="button">Cancel</button>
+              <button id="tx-cancel" class="secondary-btn" type="button">Cancel</button>
             </div>
             <div class="form-error" id="tx-error"></div>
           </form>
@@ -147,7 +154,7 @@
           <div id="funding-message"></div>
           <ul id="funding-options-list"></ul>
           <div class="full-width actions">
-            <button id="funding-cancel" type="button">Cancel</button>
+            <button id="funding-cancel" class="secondary-btn" type="button">Cancel</button>
           </div>
         </div>
 
@@ -184,7 +191,7 @@
             <div>
               <label for="wallet-mode">Mode</label>
               <select id="wallet-mode" name="mode"></select>
-              <div id="wallet-mode-note" style="font-size:0.9rem; color:#6b7280; margin-top:6px"></div>
+              <div id="wallet-mode-note" class="note"></div>
             </div>
             <div>
               <label for="wallet-name">Name</label>
@@ -200,7 +207,7 @@
             </div>
             <div class="full-width actions">
               <button id="wallet-submit" type="submit">Create Wallet</button>
-              <button id="wallet-cancel" type="button">Cancel</button>
+              <button id="wallet-cancel" class="secondary-btn" type="button">Cancel</button>
             </div>
             <div class="form-error" id="wallet-error"></div>
           </form>
@@ -300,54 +307,55 @@
       <h3>Settle Loan</h3>
       <div>
         <label>Counterparty</label>
-        <div id="settle-counterparty"></div>
+        <div id="settle-counterparty" class="highlight-box"></div>
       </div>
-      <div>
+      <div style="margin-top: 1rem;">
         <label for="settle-amount">Amount</label>
         <input id="settle-amount" type="number" step="0.01" />
       </div>
-      <div>
+      <div style="margin-top: 1rem;">
         <label for="settle-source">Source Wallet</label>
         <select id="settle-source"></select>
       </div>
-      <div class="actions">
+      <div class="actions" style="margin-top: 1.5rem;">
         <button id="settle-send">Settle</button>
-        <button id="settle-cancel" type="button">Cancel</button>
+        <button id="settle-cancel" class="secondary-btn" type="button">Cancel</button>
       </div>
     </div>
   </div>
+  
   <div id="interwallet-settle-panel" class="modal-overlay hidden">
     <div class="modal">
       <h3>Settle Inter-Wallet Loan</h3>
       <div>
         <label>Loan</label>
-        <div id="interwallet-settle-label"></div>
+        <div id="interwallet-settle-label" class="highlight-box"></div>
       </div>
-      <div>
+      <div style="margin-top: 1rem;">
         <label for="interwallet-settle-amount">Amount</label>
         <input id="interwallet-settle-amount" type="number" step="0.01" />
       </div>
-      <div class="actions">
+      <div class="actions" style="margin-top: 1.5rem;">
         <button id="interwallet-settle-send">Settle</button>
-        <button id="interwallet-settle-cancel" type="button">Cancel</button>
+        <button id="interwallet-settle-cancel" class="secondary-btn" type="button">Cancel</button>
       </div>
     </div>
   </div>
+  
   <div id="confirm-modal" class="modal-overlay hidden">
     <div class="modal">
       <h3 id="confirm-title">Confirm</h3>
       <div id="confirm-message"></div>
-      <div id="confirm-details" style="margin-top:8px; color:#6b7280"></div>
-      <div class="full-width actions" style="margin-top:1rem;">
+      <div id="confirm-details" class="note mt-1"></div>
+      <div class="full-width actions" style="margin-top:1.5rem;">
         <button id="confirm-yes">Yes</button>
-        <button id="confirm-no" type="button">No</button>
+        <button id="confirm-no" class="secondary-btn" type="button">No</button>
       </div>
     </div>
   </div>
   <div id="toasts" aria-live="polite" aria-atomic="true"></div>
   <script type="module" src="/main.js"></script>
   <script>
-    // Lightweight fallback UI wiring in case app.js fails
     (function(){
       const toasts = document.getElementById('toasts');
       if (!window.showToast) {
@@ -362,7 +370,6 @@
         nav.forEach(b=> b.classList.toggle('active', b.dataset.view===viewId));
       }
       nav.forEach(b=> b.addEventListener('click', ()=> setActive(b.dataset.view)));
-      // ensure today prefilled for tx-date
       const txDate = document.getElementById('tx-date');
       if (txDate && !txDate.value) txDate.value = new Date().toISOString().split('T')[0];
     })();

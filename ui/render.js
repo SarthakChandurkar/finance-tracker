@@ -30,16 +30,16 @@ export function renderTransactions(transactions, wallets) {
   transactionTableBody.innerHTML = (transactions || []).map((t) => `
     <tr>
       <td>${t.date || ''}</td>
-      <td>${t.type || ''}</td>
-      <td>${typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || ''}</td>
+      <td><span class="stat-badge ${t.type === 'Debit' ? 'spent' : (t.type === 'Credit' || t.type === 'Salary' ? 'available' : 'accumulated')}">${t.type || ''}</span></td>
+      <td class="font-mono">${typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || ''}</td>
       <td>${walletLabelHTML(t.source_wallet_id, wallets)}</td>
       <td>${walletLabelHTML(t.destination_wallet_id, wallets)}</td>
       <td>${escapeHTML(t.category || '')}</td>
       <td>${escapeHTML(t.counterparty || '')}</td>
       <td>${escapeHTML(t.details || '')}</td>
       <td class="actions-cell">
-        <button class="edit-transaction" data-id="${t.id}">Edit</button>
-        <button class="delete-transaction" data-id="${t.id}">Delete</button>
+        <button class="btn-small edit-transaction" data-id="${t.id}">Edit</button>
+        <button class="btn-small danger-btn delete-transaction" data-id="${t.id}" style="margin-left: 0.5rem">Delete</button>
       </td>
     </tr>
   `).join('');
@@ -49,14 +49,14 @@ export function renderWallets(wallets) {
   if (!walletTableBody) return;
   walletTableBody.innerHTML = (wallets || []).map((q) => `
     <tr>
-      <td>${q.name}</td>
-      <td>${q.scope || ''}</td>
+      <td><strong>${q.name}</strong></td>
+      <td><span class="stat-badge accumulated">${q.scope || ''}</span></td>
       <td></td>
-      <td>${q.target_amount || ''}</td>
+      <td class="font-mono">${q.target_amount || ''}</td>
       <td>${walletLabelHTML(q.eom_sweep_destination, wallets)}</td>
       <td>
-        <button class="edit-wallet" data-id="${q.id}">Edit</button>
-        ${q.id === 'savings' ? '' : `<button class="delete-wallet" data-id="${q.id}">Delete</button>`}
+        <button class="btn-small edit-wallet" data-id="${q.id}">Edit</button>
+        ${q.id === 'savings' ? '' : `<button class="btn-small danger-btn delete-wallet" data-id="${q.id}" style="margin-left: 0.5rem">Delete</button>`}
       </td>
     </tr>
   `).join('');
@@ -66,9 +66,9 @@ export function renderCategories(categories) {
   if (!categoryTableBody) return;
   categoryTableBody.innerHTML = (categories || []).map((c) => `
     <tr>
-      <td>${c.name}</td>
-      <td>
-        <button class="delete-category" data-id="${c.id}">Delete</button>
+      <td><strong>${escapeHTML(c.name)}</strong></td>
+      <td style="text-align: right;">
+        <button class="btn-small danger-btn delete-category" data-id="${c.id}">Delete</button>
       </td>
     </tr>
   `).join('');
@@ -76,75 +76,110 @@ export function renderCategories(categories) {
 
 export function renderLoanLedger(entries) {
   if (!loanLedger) return;
-  loanLedger.innerHTML = (entries || []).map((entry) => `
-    <div class="loan-entry">
-      <span>${entry.counterparty}: outstanding ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
-      <!-- <button class="settle-loan" data-counterparty="${entry.counterparty}">Settle</button> -->
-    </div>
-  `).join('');
+  loanLedger.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
+    <li class="modern-list-item">
+      <div class="item-info">
+        <span class="item-name">${escapeHTML(entry.counterparty)}</span>
+        <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
+      </div>
+    </li>
+  `).join('') + `</ul>`;
 }
 
 export function renderInterWalletLoanLedger(entries) {
   if (!interWalletLoanLedger) return;
-  interWalletLoanLedger.innerHTML = (entries || []).map((entry) => `
-    <div class="loan-entry">
-      <span>${entry.lender_wallet_name} &rarr; ${entry.borrower_wallet_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
-      <!-- <button class="settle-interwallet-loan"
-        data-lender-id="${entry.lender_wallet_id}"
-        data-lender-name="${entry.lender_wallet_name}"
-        data-borrower-id="${entry.borrower_wallet_id}"
-        data-borrower-name="${entry.borrower_wallet_name}">Settle</button> -->
-    </div>
-  `).join('');
+  interWalletLoanLedger.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
+    <li class="modern-list-item">
+      <div class="item-info">
+        <span class="item-name">${escapeHTML(entry.lender_wallet_name)} &rarr; ${escapeHTML(entry.borrower_wallet_name)}</span>
+        <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding || 0).toFixed(2)}</span>
+      </div>
+    </li>
+  `).join('') + `</ul>`;
 }
 
 
 export function renderLoanLedger_settle(entries) {
   if (!loanLedger_settle) return;
-  loanLedger_settle.innerHTML = (entries || []).map((entry) => `
-    <div class="loan-entry">
-      <span>${entry.counterparty}: outstanding ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
-      <button class="settle-loan" data-counterparty="${entry.counterparty}">Settle</button>
-    </div>
-  `).join('');
+  loanLedger_settle.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
+    <li class="modern-list-item flex-between">
+      <div class="item-info">
+        <span class="item-name">${escapeHTML(entry.counterparty)}</span>
+        <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding_external_loan || 0).toFixed(2)}</span>
+      </div>
+      <button class="settle-loan btn-small" data-counterparty="${escapeHTML(entry.counterparty)}">Settle</button>
+    </li>
+  `).join('') + `</ul>`;
 }
 
 export function renderInterWalletLoanLedger_settle(entries) {
   if (!interWalletLoanLedger_settle) return;
-  interWalletLoanLedger_settle.innerHTML = (entries || []).map((entry) => `
-    <div class="loan-entry">
-      <span>${entry.lender_wallet_name} &rarr; ${entry.borrower_wallet_name}: outstanding ${Number(entry.outstanding || 0).toFixed(2)}</span>
-      <button class="settle-interwallet-loan"
-        data-lender-id="${entry.lender_wallet_id}"
-        data-lender-name="${entry.lender_wallet_name}"
-        data-borrower-id="${entry.borrower_wallet_id}"
-        data-borrower-name="${entry.borrower_wallet_name}">Settle</button>
-    </div>
-  `).join('');
+  interWalletLoanLedger_settle.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
+    <li class="modern-list-item flex-between">
+      <div class="item-info">
+        <span class="item-name">${escapeHTML(entry.lender_wallet_name)} &rarr; ${escapeHTML(entry.borrower_wallet_name)}</span>
+        <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding || 0).toFixed(2)}</span>
+      </div>
+      <button class="settle-interwallet-loan btn-small"
+        data-lender-id="${escapeHTML(entry.lender_wallet_id)}"
+        data-lender-name="${escapeHTML(entry.lender_wallet_name)}"
+        data-borrower-id="${escapeHTML(entry.borrower_wallet_id)}"
+        data-borrower-name="${escapeHTML(entry.borrower_wallet_name)}">Settle</button>
+    </li>
+  `).join('') + `</ul>`;
 }
 
 export function renderDashboard(walletData, categoryData) {
   if (walletBreakdowns && walletData) {
     walletBreakdowns.innerHTML = `
-      <div>
-        <h4>Monthly Wallets</h4>
-        <ul>${(walletData.monthly || []).map((q) => `<li>${q.wallet_name || q.wallet_id}: spent ${Number(q.debited).toFixed(2)}, available ${Number(q.available_balance).toFixed(2)}</li>`).join('')}</ul>
+      <div class="dashboard-section">
+        <h4 class="section-title">Monthly Wallets</h4>
+        <ul class="modern-list">${(walletData.monthly || []).map((q) => `
+          <li class="modern-list-item">
+            <div class="item-info">
+              <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
+              <div class="item-stats">
+                <span class="stat-badge spent font-mono">Spent: ${Number(q.debited).toFixed(2)}</span>
+                <span class="stat-badge available font-mono">Avail: ${Number(q.available_balance).toFixed(2)}</span>
+              </div>
+            </div>
+          </li>`).join('')}
+        </ul>
       </div>
-      <div>
-        <h4>Global Wallets</h4>
-        <ul>${(walletData.global || []).map((q) => `<li>${q.wallet_name || q.wallet_id}: accumulated ${Number(q.accumulated).toFixed(2)}</li>`).join('')}</ul>
+      <div class="dashboard-section mt-3">
+        <h4 class="section-title">Global Wallets</h4>
+        <ul class="modern-list">${(walletData.global || []).map((q) => `
+          <li class="modern-list-item">
+            <div class="item-info">
+              <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
+              <div class="item-stats">
+                <span class="stat-badge accumulated font-mono">Accumulated: ${Number(q.accumulated).toFixed(2)}</span>
+              </div>
+            </div>
+          </li>`).join('')}
+        </ul>
       </div>
     `;
   }
   if (categoryTotals && categoryData) {
     categoryTotals.innerHTML = `
-      <div>
-        <h4>Monthly Totals</h4>
-        <ul>${(categoryData.monthly || []).map((c) => `<li>${c.category_name}: ${Number(c.total).toFixed(2)}</li>`).join('')}</ul>
+      <div class="dashboard-section">
+        <h4 class="section-title">Monthly Totals</h4>
+        <ul class="modern-list">${(categoryData.monthly || []).map((c) => `
+          <li class="modern-list-item flex-between">
+            <span class="item-name">${escapeHTML(c.category_name)}</span>
+            <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
+          </li>`).join('')}
+        </ul>
       </div>
-      <div>
-        <h4>Global Totals</h4>
-        <ul>${(categoryData.global || []).map((c) => `<li>${c.category_name}: ${Number(c.total).toFixed(2)}</li>`).join('')}</ul>
+      <div class="dashboard-section mt-3">
+        <h4 class="section-title">Global Totals</h4>
+        <ul class="modern-list">${(categoryData.global || []).map((c) => `
+          <li class="modern-list-item flex-between">
+            <span class="item-name">${escapeHTML(c.category_name)}</span>
+            <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
+          </li>`).join('')}
+        </ul>
       </div>
     `;
   }
@@ -192,10 +227,10 @@ export function renderTodayTasks(tasks) {
   const today = formatDate(new Date());
   const todays = (tasks || []).filter((t) => toDateOnly(t.due_date) === today);
   if (!todays.length) {
-    todayTasksEl.innerHTML = '<p class="note">No tasks due today.</p>';
+    todayTasksEl.innerHTML = '<p class="note" style="margin-top:0;">No tasks due today.</p>';
     return;
   }
-  todayTasksEl.innerHTML = `<ul class="today-task-list">${todays.map((t) => `<li>${escapeHTML(t.title || '')}</li>`).join('')}</ul>`;
+  todayTasksEl.innerHTML = `<ul class="today-task-list">${todays.map((t) => `<li><strong>${escapeHTML(t.title || '')}</strong></li>`).join('')}</ul>`;
 }
 
 export function showTasksConnecting() {
@@ -203,7 +238,7 @@ export function showTasksConnecting() {
     taskList.innerHTML = '<li class="task-empty task-connecting">Connecting to task server… this can take up to a minute if it has been idle.</li>';
   }
   if (todayTasksEl) {
-    todayTasksEl.innerHTML = '<p class="note task-connecting">Connecting to task server…</p>';
+    todayTasksEl.innerHTML = '<p class="note task-connecting" style="margin-top:0;">Connecting to task server…</p>';
   }
 }
 
