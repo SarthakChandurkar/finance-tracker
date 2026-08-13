@@ -25,6 +25,7 @@ var authPages = map[string]bool{
 var publicPaths = map[string]bool{
 	"/api/login":    true,
 	"/api/register": true,
+	"/api/status":   true,
 }
 
 // publicAssetSuffixes lets static files the login/register pages depend
