@@ -51,7 +51,6 @@ export function renderWallets(wallets) {
     <tr>
       <td><strong>${q.name}</strong></td>
       <td><span class="stat-badge accumulated">${q.scope || ''}</span></td>
-      <td></td>
       <td class="font-mono">${q.target_amount || ''}</td>
       <td>${walletLabelHTML(q.eom_sweep_destination, wallets)}</td>
       <td>

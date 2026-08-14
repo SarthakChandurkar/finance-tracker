@@ -97,6 +97,15 @@ func main() {
 		todoServerURL = remote.DefaultTodoServerURL
 	}
 
+	todoServerTimeout := remote.TodoServerTimeout
+	if raw := os.Getenv("TODO_SERVER_TIMEOUT_SECONDS"); raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+			todoServerTimeout = time.Duration(secs) * time.Second
+		} else {
+			log.Printf("invalid TODO_SERVER_TIMEOUT_SECONDS=%q, using default of %s", raw, todoServerTimeout)
+		}
+	}
+
 	sessionTTL := 20 * time.Minute
 	if raw := os.Getenv("SESSION_TTL_MINUTES"); raw != "" {
 		if mins, err := strconv.Atoi(raw); err == nil && mins > 0 {
@@ -110,7 +119,7 @@ func main() {
 
 	server := &apiServer{
 		store:       store,
-		tasks:       remote.NewTodoClient(todoServerURL, remote.TodoServerTimeout),
+		tasks:       remote.NewTodoClient(todoServerURL, todoServerTimeout),
 		authService: domain.NewAuthService(store, sessionStore),
 	}
 
@@ -150,7 +159,7 @@ func (s *apiServer) reloadMiddleware(next http.Handler) http.Handler {
 func (s *apiServer) routes() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/register", s.handleRegister)
+	// mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/account", s.handleAccount)
@@ -774,7 +783,20 @@ func (s *apiServer) handleTaskbyID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *apiServer) proxyTasks(w http.ResponseWriter, r *http.Request, pathSuffix string) {
-	resp, err := s.tasks.Forward(r.Context(), r.Method, pathSuffix, r.Body, r.Header)
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// The task server does no authentication of its own - it trusts
+	// whatever owner ID it's given and partitions data by it. This is
+	// what makes GET/POST/etc. return only (and create only under) the
+	// signed-in user's own tasks.
+	headers := r.Header.Clone()
+	headers.Set("X-User-Id", userID)
+
+	resp, err := s.tasks.Forward(r.Context(), r.Method, pathSuffix, r.Body, headers)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{
 			"error": fmt.Sprintf("task server unavailable: %v", err),
