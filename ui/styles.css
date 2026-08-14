@@ -143,7 +143,7 @@ nav button {
   border: 1px solid #e2e8f0;
   background: white;
   color: #475569;
-  border-radius: 9999px; /* Pill shape for modern look */
+  border-radius: 9999px;
   cursor: pointer;
   font-weight: 500;
   transition: all 0.2s;
@@ -247,6 +247,10 @@ nav button:hover {
   font-weight: 600;
   color: #1e293b;
   font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 .item-value {
   font-size: 0.95rem;
@@ -262,16 +266,32 @@ nav button:hover {
   gap: 0.5rem;
   margin-top: 0.25rem;
 }
+
+/* --- Badges --- */
 .stat-badge {
   font-size: 0.75rem;
   padding: 0.15rem 0.6rem;
   border-radius: 9999px;
   font-weight: 600;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
 }
-.stat-badge.spent { background: #fee2e2; color: #b91c1c; }
-.stat-badge.available { background: #dcfce7; color: #15803d; }
-.stat-badge.accumulated { background: #e0e7ff; color: #4338ca; }
+.stat-badge.spent { background: #fee2e2; color: #b91c1c; } /* Red */
+.stat-badge.available { background: #dcfce7; color: #15803d; } /* Green */
+.stat-badge.accumulated { background: #e0e7ff; color: #4338ca; } /* Blue (Default) */
+
+/* Specific Scope Colors */
+.stat-badge.monthly { background: #fef9c3; color: #a16207; } /* Yellow */
+.stat-badge.global { background: #f5ebdf; color: #78350f; } /* Brown */
+
+/* Specific Transaction Type Colors */
+.stat-badge.iw-loan { background: #ffedd5; color: #c2410c; } /* Orange */
+.stat-badge.loan-received { background: #fce7f3; color: #be185d; } /* Reddish-pink */
+
+/* Global Target Completion Badge */
+.stat-badge.completion { background: #fce7f3; color: #db2777; } /* Pink */
+
 .negative { color: #b91c1c; font-weight: 600; }
 .flex-between {
   display: flex;
@@ -412,6 +432,43 @@ tbody tr:hover {
   background: #f8fafc;
 }
 
+/* --- Table Sorting --- */
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  transition: background 0.15s ease;
+}
+.sortable:hover {
+  background: #e2e8f0;
+}
+.sort-icon {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  opacity: 0.2;
+  font-size: 0.85em;
+  margin-left: 0.25rem;
+  vertical-align: middle;
+}
+.sort-icon::after {
+  content: '↕';
+}
+.sort-asc .sort-icon {
+  opacity: 1;
+  color: #4f46e5;
+}
+.sort-asc .sort-icon::after {
+  content: '↑';
+}
+.sort-desc .sort-icon {
+  opacity: 1;
+  color: #4f46e5;
+}
+.sort-desc .sort-icon::after {
+  content: '↓';
+}
+
 button {
   border: 1px solid transparent;
   background: #e0e7ff;
@@ -460,6 +517,25 @@ button[type="submit"]:hover,
 .status {
   margin-top: 1rem;
   font-size: 0.95rem;
+}
+
+/* --- Form Errors Alert Banner --- */
+.form-error {
+  grid-column: 1 / -1;
+  margin-top: 0.5rem;
+  padding: 1rem 1.25rem;
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #ef4444;
+  color: #991b1b;
+  border-radius: 0.75rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.1), 0 2px 4px -1px rgba(239, 68, 68, 0.06);
+  animation: fadeIn 0.3s ease;
+}
+.form-error:empty {
+  display: none;
 }
 
 /* Tasks tab */

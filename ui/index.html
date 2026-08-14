@@ -12,7 +12,6 @@
       <div class="header-left">
         <h1>Finance Tracker</h1>
       </div>
-      <!-- Moved to independent container to fix mobile clipping -->
       <div class="header-right">
         <div class="profile-menu">
           <button id="profile-toggle" class="profile-btn" type="button" aria-haspopup="true" aria-expanded="false">
@@ -31,7 +30,6 @@
       </div>
     </header>
     
-    <!-- Extracted Nav so it perfectly drops down natively below header on mobile -->
     <nav id="main-nav">
       <button data-view="dashboard" class="active">Dashboard</button>
       <button data-view="transactions">Transactions</button>
@@ -150,10 +148,23 @@
         </div>
 
         <div class="panel hidden" id="funding-panel">
-          <h3>Funding Options</h3>
-          <div id="funding-message"></div>
-          <ul id="funding-options-list"></ul>
-          <div class="full-width actions">
+          <h3>Insufficient Balance</h3>
+          <p id="funding-message" class="note"></p>
+          <div class="table-wrapper mt-3" id="funding-table-container">
+            <table id="funding-table">
+              <thead>
+                <tr>
+                  <th>Mechanism</th>
+                  <th>Source Wallet</th>
+                  <th>Available</th>
+                  <th>Required</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="funding-options-list"></tbody>
+            </table>
+          </div>
+          <div class="full-width actions mt-3">
             <button id="funding-cancel" class="secondary-btn" type="button">Cancel</button>
           </div>
         </div>
@@ -164,14 +175,14 @@
             <table id="transaction-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Type</th>
-                  <th>Amount</th>
-                  <th>Source</th>
-                  <th>Destination</th>
-                  <th>Category</th>
-                  <th>Counterparty</th>
-                  <th>Details</th>
+                  <th class="sortable" data-sort="date">Date <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="type">Type <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="amount">Amount <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="source_wallet_id">Source <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="destination_wallet_id">Destination <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="category">Category <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="counterparty">Counterparty <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="details">Details <span class="sort-icon"></span></th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -219,10 +230,10 @@
             <table id="wallet-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Scope</th>
-                  <th>Target Amount</th>
-                  <th>EOM Destination</th>
+                  <th class="sortable" data-sort="name">Name <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="scope">Scope <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="target_amount">Target Amount <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="eom_sweep_destination">EOM Destination <span class="sort-icon"></span></th>
                   <th>Actions</th>
                 </tr>
               </thead>

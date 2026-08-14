@@ -14,22 +14,34 @@ import {
   profileUsername, profileLogout
 } from './dom.js';
 
-import { showToast, setFormError, fetchJSON, normalizeFormNumbers, formatDate } from './utils.js';
+import { showToast, setFormError, fetchJSON, normalizeFormNumbers, formatDate, escapeHTML } from './utils.js';
 import { buildSelectOptions, populateDestinationOptions, renderTasks } from './render.js';
 import { 
   currentWallets, currentTransactions, currentTasks, pendingTransaction, 
   editingWalletId, editingTransactionId, editingTaskId, pendingInterWalletSettlement,
   setPendingTransaction, setEditingWalletId, setEditingTransactionId, 
-  setEditingTaskId, setPendingInterWalletSettlement, findWallet,
+  setEditingTaskId, setPendingInterWalletSettlement, findWallet, setTxSort, setWalletSort,
   refreshData, refreshTransactionsTab, refreshTasks, refreshWalletsTab, refreshCategoriesTab 
 } from './state.js';
 
-// --- Constants ---
+// --- Constants & Helpers ---
 const transactionTypes = ['Debit', 'Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Wallet Loan'];
 const walletModeOptions = ['Both', 'Monthly', 'Global'];
 const paymentModes = ['Self', 'On Behalf of Other'];
 const paymentInstruments = ['UPI', 'Cash', 'Card', 'Bank Transfer', 'Cheque'];
 let localConfirmCallback = null;
+
+function sanitizeErrorMsg(msg) {
+  if (!msg) return '';
+  let sanitized = String(msg);
+  (currentWallets || []).forEach((w) => {
+    if (w.id && sanitized.includes(String(w.id))) {
+      const regex = new RegExp(w.id, 'g');
+      sanitized = sanitized.replace(regex, `'${w.name} (${w.scope})'`);
+    }
+  });
+  return sanitized;
+}
 
 // --- View & Navigation Logic ---
 function setActiveView(viewId) {
@@ -83,7 +95,7 @@ profileLogout && profileLogout.addEventListener('click', () => {
   closeProfileDropdown();
   fetchJSON('/api/logout', { method: 'POST' })
     .then(() => { window.location.href = '/login.html'; })
-    .catch((err) => showToast(err.message || 'Failed to log out', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to log out', 'error'));
 });
 
 function loadProfile() {
@@ -185,19 +197,60 @@ confirmNo && confirmNo.addEventListener('click', closeConfirm);
 
 function showFundingOptions(errorBody) {
   if (!fundingPanel) return;
-  const options = (errorBody && errorBody.options) || [];
+  
+  const options = errorBody.Options || errorBody.options || [];
+  const requestedAmount = errorBody.Requested || (pendingTransaction && pendingTransaction.payload && pendingTransaction.payload.amount) || 0;
+  
+  const tableContainer = document.getElementById('funding-table-container');
+
   if (!options.length) {
-    fundingMessage.textContent = errorBody.message || 'No funding options are available for this shortfall.';
-    fundingOptionsList.innerHTML = '';
+    fundingMessage.textContent = 'Insufficient balance. No feasible mechanisms are available for this shortfall.';
+    fundingMessage.style.color = '#dc2626'; 
+    if (tableContainer) tableContainer.style.display = 'none';
   } else {
-    fundingMessage.textContent = errorBody.message || 'Choose a funding option to remediate the shortfall.';
-    fundingOptionsList.innerHTML = options.map((opt) => `
-      <li>
-        <button class="fund-option" data-mechanism="${opt.mechanism}" data-source-wallet-id="${opt.source_wallet_id}">${opt.label || opt.mechanism}</button>
-      </li>
-    `).join('');
+    fundingMessage.textContent = `Insufficient balance. Select a feasible mechanism below to satisfy the required ${Number(requestedAmount).toFixed(2)}.`;
+    fundingMessage.style.color = '#475569';
+    if (tableContainer) tableContainer.style.display = '';
+    
+    fundingOptionsList.innerHTML = options.map((opt) => {
+      const sourceWallet = currentWallets.find(w => String(w.id) === String(opt.source_wallet_id));
+      const rawName = opt.source_wallet_name || opt.source_wallet_id;
+      let displayName = escapeHTML(rawName);
+      
+      if (sourceWallet) {
+        const scopeClass = sourceWallet.scope === 'Monthly' ? 'monthly' : (sourceWallet.scope === 'Global' ? 'global' : 'accumulated');
+        displayName = `${escapeHTML(rawName)} <span class="stat-badge ${scopeClass}">${escapeHTML(sourceWallet.scope)}</span>`;
+      }
+      
+      let mechClass = 'accumulated'; 
+      if (opt.mechanism === 'Debit') mechClass = 'spent';
+      else if (opt.mechanism === 'Credit' || opt.mechanism === 'Salary') mechClass = 'available';
+      else if (opt.mechanism === 'Inter-Wallet Loan') mechClass = 'iw-loan';
+      else if (opt.mechanism === 'Loan Received') mechClass = 'loan-received';
+      
+      return `
+      <tr>
+        <td><span class="stat-badge ${mechClass}">${escapeHTML(opt.mechanism)}</span></td>
+        <td><div style="display: flex; align-items: center; gap: 0.4rem;">${displayName}</div></td>
+        <td class="font-mono">${Number(opt.available_balance || 0).toFixed(2)}</td>
+        <td class="font-mono">${Number(requestedAmount).toFixed(2)}</td>
+        <td class="actions-cell">
+          <button class="btn-small fund-option" 
+            data-mechanism="${escapeHTML(opt.mechanism)}" 
+            data-source-wallet-id="${escapeHTML(opt.source_wallet_id)}"
+            data-amount="${requestedAmount}">
+            Commit & Pay
+          </button>
+        </td>
+      </tr>
+    `}).join('');
   }
+  
   fundingPanel.classList.remove('hidden');
+  
+  setTimeout(() => {
+    fundingPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50); 
 }
 
 function hideFundingOptions() {
@@ -218,7 +271,24 @@ function openLoanSettlePanel(counterparty) {
 function openInterWalletSettlePanel(lenderId, lenderName, borrowerId, borrowerName) {
   if (!interWalletSettlePanel) return;
   setPendingInterWalletSettlement({ lenderId, borrowerId });
-  interWalletSettleLabel.textContent = `${borrowerName} owes ${lenderName}`;
+  
+  const getBadgeHTML = (id, rawName) => {
+    const wallet = currentWallets.find(w => String(w.id) === String(id));
+    if (wallet) {
+      const scopeClass = wallet.scope === 'Monthly' ? 'monthly' : (wallet.scope === 'Global' ? 'global' : 'accumulated');
+      return `${escapeHTML(rawName)} <span class="stat-badge ${scopeClass}">${escapeHTML(wallet.scope)}</span>`;
+    }
+    return escapeHTML(rawName);
+  };
+
+  interWalletSettleLabel.innerHTML = `
+    <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+      ${getBadgeHTML(borrowerId, borrowerName)} 
+      <span style="color: #64748b; font-weight: normal; margin: 0 0.2rem;">owes</span> 
+      ${getBadgeHTML(lenderId, lenderName)}
+    </div>
+  `;
+  
   interWalletSettleAmount.value = '';
   interWalletSettlePanel.classList.remove('hidden');
 }
@@ -266,9 +336,12 @@ function openEditTransaction(id) {
 transactionForm && transactionForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
   setFormError('tx-error', '');
+  hideFundingOptions();
+  
   const fd = new FormData(transactionForm);
   const payload = Object.fromEntries(fd.entries());
   normalizeFormNumbers(payload, ['amount']);
+  
   const method = editingTransactionId ? 'PUT' : 'POST';
   const url = editingTransactionId ? `/api/transactions/${editingTransactionId}` : '/api/transactions';
   
@@ -279,11 +352,29 @@ transactionForm && transactionForm.addEventListener('submit', (ev) => {
       refreshTransactionsTab();
     })
     .catch((err) => {
-      if (err.status === 422 && err.body && err.body.options) {
-        setPendingTransaction(payload);
-        showFundingOptions(err.body);
+      let parsedOptions = null;
+      
+      if (err.body && (err.body.Options || err.body.options)) {
+        parsedOptions = err.body;
+      } else if (err.message) {
+        try { 
+          const parsed = JSON.parse(err.message); 
+          if (parsed.Options || parsed.options) {
+             parsedOptions = parsed;
+          }
+        } catch(e) {}
+      }
+
+      if (parsedOptions) {
+        setFormError('tx-error', ''); 
+        setPendingTransaction({ payload, method, url });
+        showFundingOptions(parsedOptions);
       } else {
-        setFormError('tx-error', err.message || 'Failed to save transaction');
+        let msg = sanitizeErrorMsg(err.message) || 'Failed to save transaction';
+        if (msg.includes('"Available":') || msg.toLowerCase().includes('insufficient balance')) {
+           msg = 'Insufficient balance in the source wallet.';
+        }
+        setFormError('tx-error', msg);
       }
     });
 });
@@ -308,7 +399,7 @@ walletForm && walletForm.addEventListener('submit', (ev) => {
       resetWalletForm();
       refreshWalletsTab();
     })
-    .catch((err) => setFormError('wallet-error', err.message || 'Failed to save wallet'));
+    .catch((err) => setFormError('wallet-error', sanitizeErrorMsg(err.message) || 'Failed to save wallet'));
 });
 
 categoryForm && categoryForm.addEventListener('submit', (ev) => {
@@ -317,7 +408,7 @@ categoryForm && categoryForm.addEventListener('submit', (ev) => {
   const payload = Object.fromEntries(fd.entries());
   fetchJSON('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(() => { showToast('Category created', 'success'); categoryForm.reset(); refreshCategoriesTab(); })
-    .catch((err) => showToast(err.message || 'Failed to create category', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to create category', 'error'));
 });
 
 recategorizeForm && recategorizeForm.addEventListener('submit', (ev) => {
@@ -326,7 +417,7 @@ recategorizeForm && recategorizeForm.addEventListener('submit', (ev) => {
   const payload = Object.fromEntries(fd.entries());
   fetchJSON('/api/categories/recategorize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(() => { showToast('Category recategorized', 'success'); recategorizeForm.reset(); refreshCategoriesTab(); })
-    .catch((err) => showToast(err.message || 'Failed to recategorize category', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to recategorize category', 'error'));
 });
 
 taskForm && taskForm.addEventListener('submit', (ev) => {
@@ -343,18 +434,27 @@ taskForm && taskForm.addEventListener('submit', (ev) => {
       showToast('Task added', 'success');
       refreshTasks();
     })
-    .catch((err) => setFormError('task-error', err.message || 'Failed to add task'));
+    .catch((err) => setFormError('task-error', sanitizeErrorMsg(err.message) || 'Failed to add task'));
 });
 
 // --- Click Delegation (Tables & Lists) ---
 document.addEventListener('click', (event) => {
   const target = event.target;
   
+  // Table Sorting Check
+  const th = target.closest('th.sortable');
+  if (th) {
+    const tableId = th.closest('table').id;
+    if (tableId === 'transaction-table') setTxSort(th.dataset.sort);
+    else if (tableId === 'wallet-table') setWalletSort(th.dataset.sort);
+    return;
+  }
+  
   if (target.classList.contains('delete-category')) {
     openConfirm('Delete category', 'Delete this category? Transactions will be reassigned to Settled.', '', () => {
       fetchJSON(`/api/categories/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshCategoriesTab(); showToast('Category deleted', 'success'); })
-        .catch((err) => showToast(err.message || 'Failed to delete category', 'error'));
+        .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete category', 'error'));
     });
   }
   
@@ -364,7 +464,7 @@ document.addEventListener('click', (event) => {
     openConfirm('Delete wallet', 'Delete this wallet permanently? Its remaining balance will be transferred to Savings. This cannot be undone.', '', () => {
       fetchJSON(`/api/wallets/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshWalletsTab(); showToast('Wallet deleted', 'success'); })
-        .catch((err) => showToast(err.message || 'Failed to delete wallet', 'error'));
+        .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete wallet', 'error'));
     });
   }
   
@@ -374,7 +474,7 @@ document.addEventListener('click', (event) => {
     openConfirm('Delete transaction', 'Delete this transaction? This action cannot be undone.', '', () => {
       fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshTransactionsTab(); showToast('Transaction deleted', 'success'); })
-        .catch((err) => showToast(err.message || 'Failed to delete transaction', 'error'));
+        .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete transaction', 'error'));
     });
   }
   
@@ -404,7 +504,7 @@ document.addEventListener('click', (event) => {
         showToast('Task updated', 'success');
         refreshTasks();
       })
-      .catch((err) => showToast(err.message || 'Failed to update task', 'error'));
+      .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to update task', 'error'));
   }
   
   if (target.classList.contains('settle-loan')) openLoanSettlePanel(target.dataset.counterparty);
@@ -429,7 +529,7 @@ document.addEventListener('change', (event) => {
     fetchJSON(`/api/tasks/${id}`, { method: 'DELETE' })
       .then(() => { showToast('Task deleted', 'success'); refreshTasks(); })
       .catch((err) => {
-        showToast(err.message || 'Failed to delete task', 'error');
+        showToast(sanitizeErrorMsg(err.message) || 'Failed to delete task', 'error');
         checkbox.disabled = false;
         checkbox.checked = false;
         li.classList.remove('task-strike');
@@ -438,32 +538,56 @@ document.addEventListener('change', (event) => {
 });
 
 // --- General Buttons ---
-fundingOptionsList && fundingOptionsList.addEventListener('click', (event) => {
+fundingOptionsList && fundingOptionsList.addEventListener('click', async (event) => {
   const button = event.target.closest('.fund-option');
   if (!button) return;
-  if (!pendingTransaction) return showToast('No pending transaction to remediate.', 'error');
   
-  const payload = {
-    mechanism: button.dataset.mechanism,
-    source_wallet_id: button.dataset.sourceWalletId,
-    target_wallet_id: pendingTransaction.source_wallet_id,
-    amount: pendingTransaction.amount,
-    category: pendingTransaction.category,
-    counterparty: pendingTransaction.counterparty,
-    payment_mode: pendingTransaction.payment_mode,
-    payment_instrument: pendingTransaction.payment_instrument,
-    date: pendingTransaction.date,
-    details: pendingTransaction.details,
+  if (!pendingTransaction || !pendingTransaction.payload) {
+    return showToast('No pending transaction to remediate.', 'error');
+  }
+  
+  const { payload, method, url } = pendingTransaction;
+  
+  button.disabled = true;
+  button.textContent = 'Processing...';
+  
+  const mechanism = button.dataset.mechanism;
+  const sourceWalletId = button.dataset.sourceWalletId;
+  const amount = parseFloat(button.dataset.amount);
+  
+  const remediationPayload = {
+    type: mechanism,
+    amount: amount,
+    source_wallet_id: sourceWalletId,
+    destination_wallet_id: payload.source_wallet_id,
+    date: payload.date || new Date().toISOString().split('T')[0],
+    details: `Funding remediation for shortfall via ${mechanism}`
   };
   
-  fetchJSON('/api/funding-remediation', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    .then(() => {
-      setPendingTransaction(null);
-      hideFundingOptions();
-      refreshTransactionsTab();
-      showToast('Funding remediation applied', 'success');
-    })
-    .catch((err) => showToast(err.message || 'Remediation failed', 'error'));
+  try {
+    await fetchJSON('/api/transactions', { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify(remediationPayload) 
+    });
+    
+    await fetchJSON(url, { 
+      method: method, 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify(payload) 
+    });
+    
+    setPendingTransaction(null);
+    hideFundingOptions();
+    refreshTransactionsTab();
+    resetTransactionForm();
+    showToast('Remediation and transaction applied successfully', 'success');
+    
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = 'Commit & Pay';
+    showToast(sanitizeErrorMsg(err.message) || 'Remediation failed', 'error');
+  }
 });
 
 fundingCancel && fundingCancel.addEventListener('click', () => {
@@ -493,7 +617,7 @@ settleSend && settleSend.addEventListener('click', () => {
       refreshData();
       showToast('Loan settlement recorded', 'success');
     })
-    .catch((err) => showToast(err.message || 'Failed to settle loan', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error'));
 });
 
 monthEndButton && monthEndButton.addEventListener('click', () => {
@@ -508,7 +632,7 @@ monthEndButton && monthEndButton.addEventListener('click', () => {
     })
     .catch((err) => {
       if (systemStatus) {
-        systemStatus.textContent = `Month-end failed: ${err.message}`;
+        systemStatus.textContent = `Month-end failed: ${sanitizeErrorMsg(err.message)}`;
         systemStatus.style.color = '#dc2626';
       }
     });
@@ -533,7 +657,7 @@ interWalletSettleSend && interWalletSettleSend.addEventListener('click', () => {
       refreshData();
       showToast('Inter-Wallet Loan settlement recorded', 'success');
     })
-    .catch((err) => showToast(err.message || 'Failed to settle loan', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error'));
 });
 
 deleteAllTasksBtn && deleteAllTasksBtn.addEventListener('click', () => {
@@ -541,7 +665,7 @@ deleteAllTasksBtn && deleteAllTasksBtn.addEventListener('click', () => {
   openConfirm('Delete all tasks', `Delete all ${currentTasks.length} task${currentTasks.length === 1 ? '' : 's'}? This cannot be undone.`, '', () => {
     fetchJSON(`/api/tasks`, { method: 'DELETE' })
       .then(() => { showToast('All tasks deleted', 'success'); refreshTasks(); })
-      .catch((err) => { showToast(err.message || 'Failed to delete all tasks', 'error'); refreshTasks(); });
+      .catch((err) => { showToast(sanitizeErrorMsg(err.message) || 'Failed to delete all tasks', 'error'); refreshTasks(); });
   });
 });
 

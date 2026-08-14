@@ -3,9 +3,10 @@
 import { fetchJSON, showToast } from './utils.js';
 import {
   renderWallets, renderCategories, renderTransactions,
-  renderLoanLedger, renderInterWalletLoanLedger, renderLoanLedger_settle, renderInterWalletLoanLedger_settle, renderDashboard,
+  renderLoanLedger, renderInterWalletLoanLedger, renderLoanLedger_settle, 
+  renderInterWalletLoanLedger_settle, renderDashboard,
   renderTasks, renderTodayTasks, showTasksConnecting, buildSelectOptions,
-  populateDestinationOptions
+  populateDestinationOptions, renderSortIndicators
 } from './render.js';
 import {
   txSource, txCategory, sourceCategorySelect, destCategorySelect, settleSource
@@ -24,6 +25,10 @@ export let confirmCallback = null;
 export let tasksLoaded = false;
 export let pendingInterWalletSettlement = null;
 
+// --- Sort Configs ---
+export let txSortConfig = { key: 'date', dir: 'desc' };
+export let walletSortConfig = { key: 'scope', dir: 'asc' };
+
 // --- State Setters for main.js ---
 export const setPendingTransaction = (val) => pendingTransaction = val;
 export const setEditingWalletId = (val) => editingWalletId = val;
@@ -31,6 +36,50 @@ export const setEditingTransactionId = (val) => editingTransactionId = val;
 export const setEditingTaskId = (val) => editingTaskId = val;
 export const setConfirmCallback = (val) => confirmCallback = val;
 export const setPendingInterWalletSettlement = (val) => pendingInterWalletSettlement = val;
+
+// --- Sorting Logic ---
+export function applySorts() {
+  const compare = (a, b, config) => {
+    let vA = a[config.key];
+    let vB = b[config.key];
+
+    if (['source_wallet_id', 'destination_wallet_id', 'eom_sweep_destination'].includes(config.key)) {
+        vA = currentWallets.find(w => String(w.id) === String(vA))?.name || '';
+        vB = currentWallets.find(w => String(w.id) === String(vB))?.name || '';
+    }
+
+    if (config.key === 'amount' || config.key === 'target_amount') {
+        vA = Number(vA) || 0;
+        vB = Number(vB) || 0;
+    } else {
+        vA = String(vA || '').toLowerCase();
+        vB = String(vB || '').toLowerCase();
+    }
+
+    if (vA < vB) return config.dir === 'asc' ? -1 : 1;
+    if (vA > vB) return config.dir === 'asc' ? 1 : -1;
+    return 0;
+  };
+  
+  currentTransactions.sort((a, b) => compare(a, b, txSortConfig));
+  currentWallets.sort((a, b) => compare(a, b, walletSortConfig));
+}
+
+export function setTxSort(key) {
+  if (txSortConfig.key === key) txSortConfig.dir = txSortConfig.dir === 'asc' ? 'desc' : 'asc';
+  else { txSortConfig.key = key; txSortConfig.dir = 'asc'; }
+  applySorts();
+  renderTransactions(currentTransactions, currentWallets);
+  renderSortIndicators(txSortConfig, walletSortConfig);
+}
+
+export function setWalletSort(key) {
+  if (walletSortConfig.key === key) walletSortConfig.dir = walletSortConfig.dir === 'asc' ? 'desc' : 'asc';
+  else { walletSortConfig.key = key; walletSortConfig.dir = 'asc'; }
+  applySorts();
+  renderWallets(currentWallets);
+  renderSortIndicators(txSortConfig, walletSortConfig);
+}
 
 // --- Helper Functions ---
 export function findWallet(id) {
@@ -53,7 +102,6 @@ export function refreshWalletsAndCategoriesDropdowns() {
     buildSelectOptions(eomSelect, currentWallets.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
   }
 }
-
 
 export function refreshWalletsDropdowns() {
   buildSelectOptions(txSource, currentWallets.map((q) => ({ value: q.id, label: `${q.name} (${q.scope})` })));
@@ -94,7 +142,6 @@ export async function loadCategories() {
   refreshCategoriesDropdowns();
 }
 
-
 export async function refreshTasks() {
   if (!tasksLoaded) showTasksConnecting();
   try {
@@ -122,7 +169,9 @@ export async function refreshTasks() {
 export async function refreshWalletsTab() {
   try {
     await loadWallets();
+    applySorts();
     renderWallets(currentWallets);
+    renderSortIndicators(txSortConfig, walletSortConfig);
   } catch (err) {
     showToast(err.message || 'Failed to refresh wallets', 'error');
   }
@@ -142,7 +191,9 @@ export async function refreshTransactionsTab() {
     await loadWalletsAndCategories();
     const transactions = await fetchJSON('/api/transactions');
     currentTransactions = transactions || [];
+    applySorts();
     renderTransactions(currentTransactions, currentWallets);
+    renderSortIndicators(txSortConfig, walletSortConfig);
   } catch (err) {
     showToast(err.message || 'Failed to refresh transactions', 'error');
   }
@@ -163,14 +214,19 @@ export async function refreshData() {
     currentCategories = categories || [];
     currentTransactions = transactions || [];
     
+    applySorts();
+    
     renderWallets(currentWallets);
     renderCategories(currentCategories);
     renderTransactions(currentTransactions, currentWallets);
+    renderSortIndicators(txSortConfig, walletSortConfig);
+    
     renderLoanLedger(loanEntries || []);
-    renderInterWalletLoanLedger(interWalletLoanEntries || []);
+    renderInterWalletLoanLedger(interWalletLoanEntries || [], currentWallets);
     renderLoanLedger_settle(loanEntries || []);
-    renderInterWalletLoanLedger_settle(interWalletLoanEntries || []);
-    renderDashboard(walletTotals, categoryTotalsData);
+    renderInterWalletLoanLedger_settle(interWalletLoanEntries || [], currentWallets);
+    
+    renderDashboard(walletTotals, categoryTotalsData, currentWallets);
     refreshWalletsAndCategoriesDropdowns();
   } catch (err) {
     showToast(err.message || 'Failed to refresh data', 'error');

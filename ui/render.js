@@ -18,19 +18,30 @@ export function buildSelectOptions(select, values, includeEmpty = true) {
   }).join('');
 }
 
+// Generates the HTML Badge for the wallet (visual output)
 export function walletLabelHTML(walletId, wallets) {
   if (!walletId) return '';
   const q = wallets.find((w) => String(w.id) === String(walletId));
-  if (q) return q.name;
+  if (q) {
+    const scopeClass = q.scope === 'Monthly' ? 'monthly' : (q.scope === 'Global' ? 'global' : 'accumulated');
+    return `${escapeHTML(q.name)} <span class="stat-badge ${scopeClass}">${escapeHTML(q.scope)}</span>`;
+  }
   return '<span style="color:#dc2626;font-weight:600;">DELETED</span>';
 }
 
 export function renderTransactions(transactions, wallets) {
   if (!transactionTableBody) return;
-  transactionTableBody.innerHTML = (transactions || []).map((t) => `
+  transactionTableBody.innerHTML = (transactions || []).map((t) => {
+    let typeClass = 'accumulated'; 
+    if (t.type === 'Debit') typeClass = 'spent';
+    else if (t.type === 'Credit' || t.type === 'Salary') typeClass = 'available';
+    else if (t.type === 'Inter-Wallet Loan') typeClass = 'iw-loan';
+    else if (t.type === 'Loan Received') typeClass = 'loan-received';
+    
+    return `
     <tr>
       <td>${t.date || ''}</td>
-      <td><span class="stat-badge ${t.type === 'Debit' ? 'spent' : (t.type === 'Credit' || t.type === 'Salary' ? 'available' : 'accumulated')}">${t.type || ''}</span></td>
+      <td><span class="stat-badge ${typeClass}">${t.type || ''}</span></td>
       <td class="font-mono">${typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || ''}</td>
       <td>${walletLabelHTML(t.source_wallet_id, wallets)}</td>
       <td>${walletLabelHTML(t.destination_wallet_id, wallets)}</td>
@@ -42,23 +53,36 @@ export function renderTransactions(transactions, wallets) {
         <button class="btn-small danger-btn delete-transaction" data-id="${t.id}" style="margin-left: 0.5rem">Delete</button>
       </td>
     </tr>
-  `).join('');
+  `}).join('');
 }
 
 export function renderWallets(wallets) {
   if (!walletTableBody) return;
-  walletTableBody.innerHTML = (wallets || []).map((q) => `
+  walletTableBody.innerHTML = (wallets || []).map((q) => {
+    const scopeClass = q.scope === 'Monthly' ? 'monthly' : (q.scope === 'Global' ? 'global' : 'accumulated');
+    return `
     <tr>
-      <td><strong>${q.name}</strong></td>
-      <td><span class="stat-badge accumulated">${q.scope || ''}</span></td>
+      <td><strong>${escapeHTML(q.name)}</strong></td>
+      <td><span class="stat-badge ${scopeClass}">${escapeHTML(q.scope || '')}</span></td>
       <td class="font-mono">${q.target_amount || ''}</td>
       <td>${walletLabelHTML(q.eom_sweep_destination, wallets)}</td>
-      <td>
+      <td class="actions-cell">
         <button class="btn-small edit-wallet" data-id="${q.id}">Edit</button>
         ${q.id === 'savings' ? '' : `<button class="btn-small danger-btn delete-wallet" data-id="${q.id}" style="margin-left: 0.5rem">Delete</button>`}
       </td>
     </tr>
-  `).join('');
+  `}).join('');
+}
+
+export function renderSortIndicators(txConfig, walletConfig) {
+  document.querySelectorAll('#transaction-table th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.sort === txConfig.key) th.classList.add(txConfig.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+  document.querySelectorAll('#wallet-table th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.sort === walletConfig.key) th.classList.add(walletConfig.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
 }
 
 export function renderCategories(categories) {
@@ -66,7 +90,7 @@ export function renderCategories(categories) {
   categoryTableBody.innerHTML = (categories || []).map((c) => `
     <tr>
       <td><strong>${escapeHTML(c.name)}</strong></td>
-      <td style="text-align: right;">
+      <td class="actions-cell">
         <button class="btn-small danger-btn delete-category" data-id="${c.id}">Delete</button>
       </td>
     </tr>
@@ -85,18 +109,27 @@ export function renderLoanLedger(entries) {
   `).join('') + `</ul>`;
 }
 
-export function renderInterWalletLoanLedger(entries) {
+// Helpers for the ledger to output HTML visually
+const getDispHTML = (id, name, wallets) => {
+   const w = wallets.find(x => String(x.id) === String(id));
+   if (w) {
+     const scopeClass = w.scope === 'Monthly' ? 'monthly' : (w.scope === 'Global' ? 'global' : 'accumulated');
+     return `${escapeHTML(name)} <span class="stat-badge ${scopeClass}">${escapeHTML(w.scope)}</span>`;
+   }
+   return escapeHTML(name);
+};
+
+export function renderInterWalletLoanLedger(entries, wallets = []) {
   if (!interWalletLoanLedger) return;
   interWalletLoanLedger.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
     <li class="modern-list-item">
       <div class="item-info">
-        <span class="item-name">${escapeHTML(entry.lender_wallet_name)} &rarr; ${escapeHTML(entry.borrower_wallet_name)}</span>
+        <span class="item-name">${getDispHTML(entry.lender_wallet_id, entry.lender_wallet_name, wallets)} &rarr; ${getDispHTML(entry.borrower_wallet_id, entry.borrower_wallet_name, wallets)}</span>
         <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding || 0).toFixed(2)}</span>
       </div>
     </li>
   `).join('') + `</ul>`;
 }
-
 
 export function renderLoanLedger_settle(entries) {
   if (!loanLedger_settle) return;
@@ -111,12 +144,17 @@ export function renderLoanLedger_settle(entries) {
   `).join('') + `</ul>`;
 }
 
-export function renderInterWalletLoanLedger_settle(entries) {
+export function renderInterWalletLoanLedger_settle(entries, wallets = []) {
   if (!interWalletLoanLedger_settle) return;
-  interWalletLoanLedger_settle.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => `
+  
+  interWalletLoanLedger_settle.innerHTML = `<ul class="modern-list">` + (entries || []).map((entry) => {
+    const lenderHTML = getDispHTML(entry.lender_wallet_id, entry.lender_wallet_name, wallets);
+    const borrowerHTML = getDispHTML(entry.borrower_wallet_id, entry.borrower_wallet_name, wallets);
+    
+    return `
     <li class="modern-list-item flex-between">
       <div class="item-info">
-        <span class="item-name">${escapeHTML(entry.lender_wallet_name)} &rarr; ${escapeHTML(entry.borrower_wallet_name)}</span>
+        <span class="item-name">${lenderHTML} &rarr; ${borrowerHTML}</span>
         <span class="item-value negative font-mono">Outstanding: ${Number(entry.outstanding || 0).toFixed(2)}</span>
       </div>
       <button class="settle-interwallet-loan btn-small"
@@ -125,10 +163,10 @@ export function renderInterWalletLoanLedger_settle(entries) {
         data-borrower-id="${escapeHTML(entry.borrower_wallet_id)}"
         data-borrower-name="${escapeHTML(entry.borrower_wallet_name)}">Settle</button>
     </li>
-  `).join('') + `</ul>`;
+  `}).join('') + `</ul>`;
 }
 
-export function renderDashboard(walletData, categoryData) {
+export function renderDashboard(walletData, categoryData, wallets = []) {
   if (walletBreakdowns && walletData) {
     walletBreakdowns.innerHTML = `
       <div class="dashboard-section">
@@ -147,15 +185,24 @@ export function renderDashboard(walletData, categoryData) {
       </div>
       <div class="dashboard-section mt-3">
         <h4 class="section-title">Global Wallets</h4>
-        <ul class="modern-list">${(walletData.global || []).map((q) => `
+        <ul class="modern-list">${(walletData.global || []).map((q) => {
+          const w = wallets.find(x => String(x.id) === String(q.wallet_id));
+          let compBadge = '';
+          if (w && Number(w.target_amount) > 0) {
+            const comp = (Number(q.accumulated) / Number(w.target_amount)) * 100;
+            compBadge = `<span class="stat-badge completion font-mono">Completion : ${comp.toFixed(1)}%</span>`;
+          }
+          return `
           <li class="modern-list-item">
             <div class="item-info">
               <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
               <div class="item-stats">
                 <span class="stat-badge accumulated font-mono">Accumulated: ${Number(q.accumulated).toFixed(2)}</span>
+                ${compBadge}
               </div>
             </div>
-          </li>`).join('')}
+          </li>`
+        }).join('')}
         </ul>
       </div>
     `;
