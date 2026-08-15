@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"financetracker/internal/models"
@@ -158,6 +159,10 @@ func (s *LoanService) AllInterWalletLoans() ([]InterWalletLoanEntry, error) {
 func (s *LoanService) SettleInterWalletLoan(borrowerID, lenderID string, amount float64, now time.Time) (models.Transaction, error) {
 	if amount <= 0 {
 		return models.Transaction{}, fmt.Errorf("amount must be greater than zero")
+	}
+
+	if math.Round(amount*100)/100 != amount {
+		return models.Transaction{}, fmt.Errorf("amount cannot have more than two decimal places")
 	}
 
 	var saved models.Transaction

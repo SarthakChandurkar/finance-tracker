@@ -1,6 +1,9 @@
 package models
 
-import "errors"
+import (
+	"errors"
+	"math"
+)
 
 type WalletScope string
 
@@ -88,6 +91,10 @@ func (q Wallet) Validate() error {
 
 	default:
 		return errors.New("scope must be 'Monthly' or 'Global'")
+	}
+
+	if math.Round(q.TargetAmount*100)/100 != q.TargetAmount {
+		return errors.New("target amount cannot have more than two decimal places")
 	}
 
 	if q.Scope == ScopeMonthlyOnly && q.TargetAmount != 0 {

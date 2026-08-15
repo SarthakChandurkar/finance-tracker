@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -13,21 +14,32 @@ func ParseFlexibleDate(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
+
+	enrichWithExactTime := func(t time.Time) time.Time {
+		// Ensure the current time is evaluated in the same timezone as the parsed date (usually UTC)
+		now := time.Now().In(t.Location())
+		return time.Date(t.Year(), t.Month(), t.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), t.Location())
+	}
+
 	if t, err := time.Parse(dateOnlyLayout, s); err == nil {
+		return enrichWithExactTime(t), nil
+	}
+
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+			return enrichWithExactTime(t), nil
+		}
 		return t, nil
 	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return truncateToDate(t), nil
-	}
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return truncateToDate(t), nil
-	}
-	return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD)", s)
-}
 
-func truncateToDate(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+			return enrichWithExactTime(t), nil
+		}
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD or RFC3339)", s)
 }
 
 type TransactionType string
@@ -141,6 +153,10 @@ func (tx *Transaction) ApplyDefaults() {
 func (tx Transaction) Validate() error {
 	if tx.Amount <= 0 {
 		return errors.New("amount is compulsory and must be greater than zero")
+	}
+
+	if math.Round(tx.Amount*100)/100 != tx.Amount {
+		return errors.New("amount cannot have more than two decimal places")
 	}
 
 	switch tx.Type {

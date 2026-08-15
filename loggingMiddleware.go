@@ -28,15 +28,18 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
-		// Default to 200: if the handler never calls WriteHeader
-		// explicitly (common for simple 200-OK responses), Go implicitly
-		// sends 200 on the first Write() — our recorder should reflect
-		// that same default rather than showing 0.
-		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		// Pass the request to the next handler first so we can log the total duration
+		next.ServeHTTP(w, r)
 
-		next.ServeHTTP(rec, r)
+		// Extract both the direct network address and the forwarded header
+		remoteAddr := r.RemoteAddr
+		forwardedFor := r.Header.Get("X-Forwarded-For")
 
-		duration := time.Since(start)
-		log.Printf("%s %s -> %d (%s)", r.Method, r.URL.Path, rec.status, duration)
+		// Extract Protocol
+		protocol := r.Proto
+
+		// Log the result with both IP values
+		log.Printf("[%s] %s | Proto: %s | RemoteAddr: %s | X-Forwarded-For: %s | Duration: %v",
+			r.Method, r.URL.Path, protocol, remoteAddr, forwardedFor, time.Since(start))
 	})
 }

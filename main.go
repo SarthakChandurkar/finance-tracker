@@ -16,6 +16,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/acme/autocert"
 
 	"financetracker/internal/domain"
 	"financetracker/internal/models"
@@ -92,6 +93,8 @@ func main() {
 		log.Fatalf("failed to load data from redis: %v", err)
 	}
 
+	env := os.Getenv("ENVIRONMENT")
+
 	todoServerURL := os.Getenv("TODO_SERVER_URL")
 	if todoServerURL == "" {
 		todoServerURL = remote.DefaultTodoServerURL
@@ -123,24 +126,80 @@ func main() {
 		authService: domain.NewAuthService(store, sessionStore),
 	}
 
-	addr := os.Getenv("ADDR")
-	if addr == "" {
-		addr = ":2911"
-	}
-
 	baseHandler := server.routes()
 
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: baseHandler,
+	// ---------------------------------------------------------
+	// 3-Way Infrastructure Routing
+	// ---------------------------------------------------------
+	if env == "production_native" {
+		// =====================================================
+		// CASE 1: Bare Metal / Dedicated VPS (ACME Let's Encrypt)
+		// =====================================================
+		domain := os.Getenv("DOMAIN")
+		if domain == "" {
+			log.Fatal("DOMAIN environment variable is required for production_native")
+		}
+
+		log.Printf("Starting native HTTPS/HTTP2 server with Let's Encrypt for domain: %s", domain)
+
+		certManager := &autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			HostPolicy: autocert.HostWhitelist(domain),
+			Cache:      autocert.DirCache("certs"),
+		}
+
+		srv := &http.Server{
+			Addr:      ":443",
+			Handler:   baseHandler,
+			TLSConfig: certManager.TLSConfig(),
+		}
+
+		// ACME HTTP-01 Challenge listener on port 80
+		go func() {
+			log.Println("Starting ACME challenge listener on :80...")
+			log.Fatal(http.ListenAndServe(":80", certManager.HTTPHandler(nil)))
+		}()
+
+		log.Println("Listening on :443 with native HTTP/2 TLS")
+		log.Fatal(srv.ListenAndServeTLS("", ""))
+
+	} else if env == "production_render" {
+		// =====================================================
+		// CASE 2: PaaS (Render / Heroku) Edge TLS Termination
+		// =====================================================
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "8080" // Fallback if no PORT is injected
+		}
+
+		log.Printf("Starting in PaaS mode. Listening on plain HTTP port %s (TLS terminated by load balancer)", port)
+
+		srv := &http.Server{
+			Addr:    ":" + port,
+			Handler: baseHandler,
+		}
+
+		log.Fatal(srv.ListenAndServe())
+
+	} else {
+		// =====================================================
+		// CASE 3: Local Development (mkcert on localhost)
+		// =====================================================
+		port := os.Getenv("PORT")
+		if port == "" {
+			port = "2911"
+		}
+
+		log.Printf("Starting in DEVELOPMENT mode with local mkcert certs on port %s", port)
+
+		srv := &http.Server{
+			Addr:    ":" + port,
+			Handler: baseHandler,
+		}
+
+		log.Printf("Local server running at https://localhost:%s", port)
+		log.Fatal(srv.ListenAndServeTLS("cert.pem", "key.pem"))
 	}
-
-	srv.Protocols = new(http.Protocols)
-	srv.Protocols.SetHTTP1(true)
-	srv.Protocols.SetUnencryptedHTTP2(true)
-
-	log.Println("server starting at PORT", addr)
-	log.Fatal(srv.ListenAndServe())
 }
 
 // **********************************MiddleWare Methods****************************************88
