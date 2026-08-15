@@ -3,7 +3,7 @@
 import { escapeHTML, toDateOnly, formatDate } from './utils.js';
 import {
   walletTableBody, transactionTableBody, categoryTableBody,
-  loanLedger, interWalletLoanLedger, walletBreakdowns, categoryTotals,
+  loanLedger, interWalletLoanLedger, monthlyWalletsEl, globalWalletsEl, monthlyTotalsEl, globalTotalsEl,
   taskList, todayTasksEl, txDestination , loanLedger_settle, interWalletLoanLedger_settle
 } from './dom.js';
 
@@ -18,7 +18,6 @@ export function buildSelectOptions(select, values, includeEmpty = true) {
   }).join('');
 }
 
-// Generates the HTML Badge for the wallet (visual output)
 export function walletLabelHTML(walletId, wallets) {
   if (!walletId) return '';
   const q = wallets.find((w) => String(w.id) === String(walletId));
@@ -38,19 +37,43 @@ export function renderTransactions(transactions, wallets) {
     else if (t.type === 'Inter-Wallet Loan') typeClass = 'iw-loan';
     else if (t.type === 'Loan Received') typeClass = 'loan-received';
     
+    const exactTime = t.date ? new Date(t.date).toLocaleString() : '';
+    const formattedAmount = typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || '';
+    
     return `
-    <tr>
-      <td>${t.date || ''}</td>
+    <tr class="summary-row" data-id="${t.id}">
+      <td>${toDateOnly(t.date)}</td>
       <td><span class="stat-badge ${typeClass}">${t.type || ''}</span></td>
-      <td class="font-mono">${typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || ''}</td>
+      <td class="font-mono">${formattedAmount}</td>
       <td>${walletLabelHTML(t.source_wallet_id, wallets)}</td>
       <td>${walletLabelHTML(t.destination_wallet_id, wallets)}</td>
-      <td>${escapeHTML(t.category || '')}</td>
-      <td>${escapeHTML(t.counterparty || '')}</td>
-      <td>${escapeHTML(t.details || '')}</td>
-      <td class="actions-cell">
-        <button class="btn-small edit-transaction" data-id="${t.id}">Edit</button>
-        <button class="btn-small danger-btn delete-transaction" data-id="${t.id}" style="margin-left: 0.5rem">Delete</button>
+      <td>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.25rem;">
+          <div style="flex: 1 1 auto; min-width: 0; word-break: break-word;">${escapeHTML(t.payment_instrument || '')}</div>
+          <svg class="expand-icon" style="flex: 0 0 auto;" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+      </td>
+    </tr>
+    <tr class="details-row" id="tx-details-${t.id}">
+      <td colspan="6">
+        <div class="expanded-wrapper">
+          <div class="expanded-content">
+            <div class="expanded-inner">
+              <div class="detail-grid">
+                <div><strong>Amount</strong><span class="font-mono">${formattedAmount}</span></div>
+                <div><strong>Date & Time</strong>${escapeHTML(exactTime || t.date || '')}</div>
+                <div><strong>Category</strong>${escapeHTML(t.category || '')}</div>
+                <div><strong>Counterparty</strong>${escapeHTML(t.counterparty || '')}</div>
+                <div><strong>Payment Instrument</strong>${escapeHTML(t.payment_instrument || '')}</div>
+                <div class="full-width"><strong>Details</strong>${escapeHTML(t.details || '')}</div>
+              </div>
+              <div class="actions-row mt-1">
+                <button class="btn-small edit-transaction" data-id="${t.id}">Edit</button>
+                <button class="btn-small danger-btn delete-transaction" data-id="${t.id}">Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
       </td>
     </tr>
   `}).join('');
@@ -60,15 +83,33 @@ export function renderWallets(wallets) {
   if (!walletTableBody) return;
   walletTableBody.innerHTML = (wallets || []).map((q) => {
     const scopeClass = q.scope === 'Monthly' ? 'monthly' : (q.scope === 'Global' ? 'global' : 'accumulated');
+    
     return `
-    <tr>
+    <tr class="summary-row" data-id="${q.id}">
       <td><strong>${escapeHTML(q.name)}</strong></td>
-      <td><span class="stat-badge ${scopeClass}">${escapeHTML(q.scope || '')}</span></td>
-      <td class="font-mono">${q.target_amount || ''}</td>
-      <td>${walletLabelHTML(q.eom_sweep_destination, wallets)}</td>
-      <td class="actions-cell">
-        <button class="btn-small edit-wallet" data-id="${q.id}">Edit</button>
-        ${q.id === 'savings' ? '' : `<button class="btn-small danger-btn delete-wallet" data-id="${q.id}" style="margin-left: 0.5rem">Delete</button>`}
+      <td>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.25rem;">
+          <span class="stat-badge ${scopeClass}">${escapeHTML(q.scope || '')}</span>
+          <svg class="expand-icon" style="flex: 0 0 auto;" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+      </td>
+    </tr>
+    <tr class="details-row" id="wallet-details-${q.id}">
+      <td colspan="2">
+        <div class="expanded-wrapper">
+          <div class="expanded-content">
+            <div class="expanded-inner">
+              <div class="detail-grid">
+                <div><strong>Target Amount</strong><span class="font-mono">${q.target_amount || 'None'}</span></div>
+                <div><strong>EOM Destination</strong>${walletLabelHTML(q.eom_sweep_destination, wallets) || 'None'}</div>
+              </div>
+              <div class="actions-row mt-1">
+                <button class="btn-small edit-wallet" data-id="${q.id}">Edit</button>
+                ${q.id === 'savings' ? '' : `<button class="btn-small danger-btn delete-wallet" data-id="${q.id}">Delete</button>`}
+              </div>
+            </div>
+          </div>
+        </div>
       </td>
     </tr>
   `}).join('');
@@ -109,7 +150,6 @@ export function renderLoanLedger(entries) {
   `).join('') + `</ul>`;
 }
 
-// Helpers for the ledger to output HTML visually
 const getDispHTML = (id, name, wallets) => {
    const w = wallets.find(x => String(x.id) === String(id));
    if (w) {
@@ -167,67 +207,58 @@ export function renderInterWalletLoanLedger_settle(entries, wallets = []) {
 }
 
 export function renderDashboard(walletData, categoryData, wallets = []) {
-  if (walletBreakdowns && walletData) {
-    walletBreakdowns.innerHTML = `
-      <div class="dashboard-section">
-        <h4 class="section-title">Monthly Wallets</h4>
-        <ul class="modern-list">${(walletData.monthly || []).map((q) => `
-          <li class="modern-list-item">
-            <div class="item-info">
-              <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
-              <div class="item-stats">
-                <span class="stat-badge spent font-mono">Spent: ${Number(q.debited).toFixed(2)}</span>
-                <span class="stat-badge available font-mono">Avail: ${Number(q.available_balance).toFixed(2)}</span>
-              </div>
-            </div>
-          </li>`).join('')}
-        </ul>
-      </div>
-      <div class="dashboard-section mt-3">
-        <h4 class="section-title">Global Wallets</h4>
-        <ul class="modern-list">${(walletData.global || []).map((q) => {
-          const w = wallets.find(x => String(x.id) === String(q.wallet_id));
-          let compBadge = '';
-          if (w && Number(w.target_amount) > 0) {
-            const comp = (Number(q.accumulated) / Number(w.target_amount)) * 100;
-            compBadge = `<span class="stat-badge completion font-mono">Completion : ${comp.toFixed(1)}%</span>`;
-          }
-          return `
-          <li class="modern-list-item">
-            <div class="item-info">
-              <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
-              <div class="item-stats">
-                <span class="stat-badge accumulated font-mono">Accumulated: ${Number(q.accumulated).toFixed(2)}</span>
-                ${compBadge}
-              </div>
-            </div>
-          </li>`
-        }).join('')}
-        </ul>
-      </div>
-    `;
+  if (monthlyWalletsEl && walletData) {
+    monthlyWalletsEl.innerHTML = `<ul class="modern-list">${(walletData.monthly || []).map((q) => `
+      <li class="modern-list-item">
+        <div class="item-info">
+          <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
+          <div class="item-stats">
+            <span class="stat-badge spent font-mono">Spent: ${Number(q.debited).toFixed(2)}</span>
+            <span class="stat-badge available font-mono">Avail: ${Number(q.available_balance).toFixed(2)}</span>
+          </div>
+        </div>
+      </li>`).join('')}
+    </ul>`;
   }
-  if (categoryTotals && categoryData) {
-    categoryTotals.innerHTML = `
-      <div class="dashboard-section">
-        <h4 class="section-title">Monthly Totals</h4>
-        <ul class="modern-list">${(categoryData.monthly || []).map((c) => `
-          <li class="modern-list-item flex-between">
-            <span class="item-name">${escapeHTML(c.category_name)}</span>
-            <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
-          </li>`).join('')}
-        </ul>
-      </div>
-      <div class="dashboard-section mt-3">
-        <h4 class="section-title">Global Totals</h4>
-        <ul class="modern-list">${(categoryData.global || []).map((c) => `
-          <li class="modern-list-item flex-between">
-            <span class="item-name">${escapeHTML(c.category_name)}</span>
-            <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
-          </li>`).join('')}
-        </ul>
-      </div>
-    `;
+  
+  if (globalWalletsEl && walletData) {
+    globalWalletsEl.innerHTML = `<ul class="modern-list">${(walletData.global || []).map((q) => {
+      const w = wallets.find(x => String(x.id) === String(q.wallet_id));
+      let compBadge = '';
+      if (w && Number(w.target_amount) > 0) {
+        const comp = (Number(q.accumulated) / Number(w.target_amount)) * 100;
+        compBadge = `<span class="stat-badge completion font-mono">Completion : ${comp.toFixed(1)}%</span>`;
+      }
+      return `
+      <li class="modern-list-item">
+        <div class="item-info">
+          <span class="item-name">${escapeHTML(q.wallet_name || q.wallet_id)}</span>
+          <div class="item-stats">
+            <span class="stat-badge accumulated font-mono">Accumulated: ${Number(q.accumulated).toFixed(2)}</span>
+            ${compBadge}
+          </div>
+        </div>
+      </li>`
+    }).join('')}
+    </ul>`;
+  }
+  
+  if (monthlyTotalsEl && categoryData) {
+    monthlyTotalsEl.innerHTML = `<ul class="modern-list">${(categoryData.monthly || []).map((c) => `
+      <li class="modern-list-item flex-between">
+        <span class="item-name">${escapeHTML(c.category_name)}</span>
+        <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
+      </li>`).join('')}
+    </ul>`;
+  }
+
+  if (globalTotalsEl && categoryData) {
+    globalTotalsEl.innerHTML = `<ul class="modern-list">${(categoryData.global || []).map((c) => `
+      <li class="modern-list-item flex-between">
+        <span class="item-name">${escapeHTML(c.category_name)}</span>
+        <span class="item-value font-mono">${Number(c.total).toFixed(2)}</span>
+      </li>`).join('')}
+    </ul>`;
   }
 }
 
@@ -262,7 +293,9 @@ export function renderTasks(tasks, editingTaskId) {
           <span class="task-title">${escapeHTML(t.title || '')}</span>
           ${t.due_date ? `<span class="task-due">${toDateOnly(t.due_date)}</span>` : ''}
         </div>
-        <button class="task-edit-btn" data-id="${t.id}" type="button" aria-label="Edit task">&#9998;</button>
+        <button class="task-edit-btn" data-id="${t.id}" type="button" aria-label="Edit task">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+        </button>
       </li>
     `;
   }).join('');

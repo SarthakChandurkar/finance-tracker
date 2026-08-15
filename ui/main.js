@@ -1,8 +1,8 @@
 // main.js — Controller, Event Listeners, and Application Flow
 
 import { 
-  views, navButtons, navMenu, hamburgerToggle, txType, txSource, txDestination, 
-  txCategory, txPaymentMode, txPaymentInstrument, txDate, transactionForm, 
+  views, navButtons, navMenu, navOverlay, hamburgerToggle, txType, txSource, txDestination, 
+  txCategory, txPaymentInstrument, txDate, transactionForm, 
   txSubmit, txCancel, walletMode, walletForm, walletSubmit, walletCancel, 
   categoryForm, recategorizeForm, walletModeNote, fundingPanel, fundingMessage, 
   fundingOptionsList, fundingCancel, loanSettlePanel, settleCounterparty, 
@@ -27,7 +27,6 @@ import {
 // --- Constants & Helpers ---
 const transactionTypes = ['Debit', 'Credit', 'Salary', 'Loan Received', 'Self Transfer', 'Inter-Wallet Loan'];
 const walletModeOptions = ['Both', 'Monthly', 'Global'];
-const paymentModes = ['Self', 'On Behalf of Other'];
 const paymentInstruments = ['UPI', 'Cash', 'Card', 'Bank Transfer', 'Cheque'];
 let localConfirmCallback = null;
 
@@ -47,7 +46,9 @@ function sanitizeErrorMsg(msg) {
 function setActiveView(viewId) {
   views.forEach((view) => view.classList.toggle('active', view.id === viewId));
   navButtons.forEach((button) => button.classList.toggle('active', button.dataset.view === viewId));
+  
   if (navMenu) navMenu.classList.remove('open');
+  if (navOverlay) navOverlay.classList.remove('open');
 }
 
 const viewRefreshers = {
@@ -56,6 +57,7 @@ const viewRefreshers = {
   wallets: refreshWalletsTab,
   categories: refreshCategoriesTab,
   tasks: refreshTasks,
+  'loan-ledger-tab': refreshData,
   system: () => {},
 };
 
@@ -68,6 +70,12 @@ navButtons.forEach((button) => button.addEventListener('click', () => {
 
 hamburgerToggle && hamburgerToggle.addEventListener('click', () => {
   if (navMenu) navMenu.classList.toggle('open');
+  if (navOverlay) navOverlay.classList.toggle('open');
+});
+
+navOverlay && navOverlay.addEventListener('click', () => {
+  if (navMenu) navMenu.classList.remove('open');
+  if (navOverlay) navOverlay.classList.remove('open');
 });
 
 // --- Profile Menu ---
@@ -91,11 +99,17 @@ document.addEventListener('click', (event) => {
   closeProfileDropdown();
 });
 
-profileLogout && profileLogout.addEventListener('click', () => {
-  closeProfileDropdown();
-  fetchJSON('/api/logout', { method: 'POST' })
-    .then(() => { window.location.href = '/login.html'; })
-    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to log out', 'error'));
+profileLogout && profileLogout.addEventListener('click', async () => {
+  profileLogout.classList.add('btn-loading');
+  try {
+    await fetchJSON('/api/logout', { method: 'POST' });
+    window.location.href = '/login.html';
+  } catch (err) {
+    showToast(sanitizeErrorMsg(err.message) || 'Failed to log out', 'error');
+  } finally {
+    profileLogout.classList.remove('btn-loading');
+    closeProfileDropdown();
+  }
 });
 
 function loadProfile() {
@@ -113,6 +127,8 @@ function updateTransactionFormFields() {
   const categoryLabel = document.querySelector('label[for="tx-category"]');
   const destinationLabel = document.querySelector('label[for="tx-destination"]');
   const counterpartyLabel = document.querySelector('label[for="tx-counterparty"]');
+  const sourceLabel = document.querySelector('label[for="tx-source"]');
+  const paymentInstrumentLabel = document.querySelector('label[for="tx-payment-instrument"]');
 
   if (categoryLabel?.parentElement) {
     categoryLabel.parentElement.style.display = type === 'Debit' ? '' : 'none';
@@ -123,8 +139,19 @@ function updateTransactionFormFields() {
     destinationLabel.parentElement.style.display = destinationRequiredTypes.includes(type) ? '' : 'none';
   }
   
+  if (sourceLabel?.parentElement) {
+    const sourceHiddenTypes = ['Credit', 'Salary', 'Loan Received'];
+    sourceLabel.parentElement.style.display = sourceHiddenTypes.includes(type) ? 'none' : '';
+  }
+  
   if (counterpartyLabel?.parentElement) {
-    counterpartyLabel.parentElement.style.display = type === 'Salary' ? 'none' : '';
+    const counterpartyHiddenTypes = ['Salary', 'Self Transfer', 'Inter-Wallet Loan'];
+    counterpartyLabel.parentElement.style.display = counterpartyHiddenTypes.includes(type) ? 'none' : '';
+  }
+  
+  if (paymentInstrumentLabel?.parentElement) {
+    const piHiddenTypes = ['Self Transfer', 'Inter-Wallet Loan'];
+    paymentInstrumentLabel.parentElement.style.display = piHiddenTypes.includes(type) ? 'none' : '';
   }
 
   populateDestinationOptions(currentWallets);
@@ -187,11 +214,20 @@ function closeConfirm() {
   confirmModal.classList.add('hidden');
 }
 
-confirmYes && confirmYes.addEventListener('click', () => {
+confirmYes && confirmYes.addEventListener('click', async () => {
   if (typeof localConfirmCallback === 'function') {
-    try { localConfirmCallback(); } catch (e) { console.error(e); }
+    confirmYes.classList.add('btn-loading');
+    try { 
+      await localConfirmCallback(); 
+    } catch (e) { 
+      console.error(e); 
+    } finally {
+      confirmYes.classList.remove('btn-loading');
+      closeConfirm();
+    }
+  } else {
+    closeConfirm();
   }
-  closeConfirm();
 });
 confirmNo && confirmNo.addEventListener('click', closeConfirm);
 
@@ -309,6 +345,10 @@ function openEditWallet(id) {
   walletModeNote.textContent = 'Wallet scope cannot be changed while editing. Create a new wallet to change scope.';
   
   updateWalletFormFields();
+  
+  setTimeout(() => {
+    walletForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50);
 }
 
 function openEditTransaction(id) {
@@ -322,7 +362,6 @@ function openEditTransaction(id) {
   transactionForm.querySelector('#tx-destination').value = txn.destination_wallet_id || '';
   transactionForm.querySelector('#tx-category').value = txn.category || '';
   transactionForm.querySelector('#tx-counterparty').value = txn.counterparty || '';
-  transactionForm.querySelector('#tx-payment-mode').value = txn.payment_mode || paymentModes[0];
   transactionForm.querySelector('#tx-payment-instrument').value = txn.payment_instrument || paymentInstruments[0];
   transactionForm.querySelector('#tx-date').value = txn.date ? txn.date.split('T')[0] : '';
   transactionForm.querySelector('#tx-details').value = txn.details || '';
@@ -330,6 +369,10 @@ function openEditTransaction(id) {
   txSubmit.textContent = 'Save Transaction';
   
   updateTransactionFormFields();
+  
+  setTimeout(() => {
+    transactionForm.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 50);
 }
 
 // --- Specific Form Submits & Actions ---
@@ -337,6 +380,9 @@ transactionForm && transactionForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
   setFormError('tx-error', '');
   hideFundingOptions();
+  
+  const btn = transactionForm.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
   
   const fd = new FormData(transactionForm);
   const payload = Object.fromEntries(fd.entries());
@@ -376,17 +422,25 @@ transactionForm && transactionForm.addEventListener('submit', (ev) => {
         }
         setFormError('tx-error', msg);
       }
+    })
+    .finally(() => {
+      if (btn) btn.classList.remove('btn-loading');
     });
 });
 
 walletForm && walletForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
   setFormError('wallet-error', '');
+  
+  const btn = walletForm.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
+  
   const fd = new FormData(walletForm);
   const payload = Object.fromEntries(fd.entries());
   normalizeFormNumbers(payload, ['target_amount']);
   
   if (payload.mode === 'Global' && payload.monthly_allocation) {
+    if (btn) btn.classList.remove('btn-loading');
     return setFormError('wallet-error', 'Monthly allocation is not applicable to Global wallets');
   }
   
@@ -399,32 +453,56 @@ walletForm && walletForm.addEventListener('submit', (ev) => {
       resetWalletForm();
       refreshWalletsTab();
     })
-    .catch((err) => setFormError('wallet-error', sanitizeErrorMsg(err.message) || 'Failed to save wallet'));
+    .catch((err) => setFormError('wallet-error', sanitizeErrorMsg(err.message) || 'Failed to save wallet'))
+    .finally(() => {
+      if (btn) btn.classList.remove('btn-loading');
+    });
 });
 
 categoryForm && categoryForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
+  
+  const btn = categoryForm.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
+  
   const fd = new FormData(categoryForm);
   const payload = Object.fromEntries(fd.entries());
   fetchJSON('/api/categories', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(() => { showToast('Category created', 'success'); categoryForm.reset(); refreshCategoriesTab(); })
-    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to create category', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to create category', 'error'))
+    .finally(() => {
+      if (btn) btn.classList.remove('btn-loading');
+    });
 });
 
 recategorizeForm && recategorizeForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
+  
+  const btn = recategorizeForm.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
+  
   const fd = new FormData(recategorizeForm);
   const payload = Object.fromEntries(fd.entries());
   fetchJSON('/api/categories/recategorize', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     .then(() => { showToast('Category recategorized', 'success'); recategorizeForm.reset(); refreshCategoriesTab(); })
-    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to recategorize category', 'error'));
+    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to recategorize category', 'error'))
+    .finally(() => {
+      if (btn) btn.classList.remove('btn-loading');
+    });
 });
 
 taskForm && taskForm.addEventListener('submit', (ev) => {
   ev.preventDefault();
   setFormError('task-error', '');
+  
+  const btn = taskForm.querySelector('button[type="submit"]');
+  if (btn) btn.classList.add('btn-loading');
+  
   const title = taskTitleInput.value.trim();
-  if (!title) return setFormError('task-error', 'Task title is required');
+  if (!title) {
+    if (btn) btn.classList.remove('btn-loading');
+    return setFormError('task-error', 'Task title is required');
+  }
   
   const payload = { title, due_date: taskDueInput.value || formatDate(new Date()) };
   fetchJSON('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -434,7 +512,10 @@ taskForm && taskForm.addEventListener('submit', (ev) => {
       showToast('Task added', 'success');
       refreshTasks();
     })
-    .catch((err) => setFormError('task-error', sanitizeErrorMsg(err.message) || 'Failed to add task'));
+    .catch((err) => setFormError('task-error', sanitizeErrorMsg(err.message) || 'Failed to add task'))
+    .finally(() => {
+      if (btn) btn.classList.remove('btn-loading');
+    });
 });
 
 // --- Click Delegation (Tables & Lists) ---
@@ -449,30 +530,41 @@ document.addEventListener('click', (event) => {
     else if (tableId === 'wallet-table') setWalletSort(th.dataset.sort);
     return;
   }
+
+  // Handle expandable transaction rows correctly
+  const summaryRow = target.closest('.summary-row');
+  if (summaryRow) {
+    summaryRow.classList.toggle('expanded');
+    return;
+  }
   
   if (target.classList.contains('delete-category')) {
     openConfirm('Delete category', 'Delete this category? Transactions will be reassigned to Settled.', '', () => {
-      fetchJSON(`/api/categories/${target.dataset.id}`, { method: 'DELETE' })
+      return fetchJSON(`/api/categories/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshCategoriesTab(); showToast('Category deleted', 'success'); })
         .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete category', 'error'));
     });
   }
   
-  if (target.classList.contains('edit-wallet')) openEditWallet(target.dataset.id);
+  if (target.classList.contains('edit-wallet')) {
+    openEditWallet(target.dataset.id);
+  }
   
   if (target.classList.contains('delete-wallet')) {
     openConfirm('Delete wallet', 'Delete this wallet permanently? Its remaining balance will be transferred to Savings. This cannot be undone.', '', () => {
-      fetchJSON(`/api/wallets/${target.dataset.id}`, { method: 'DELETE' })
+      return fetchJSON(`/api/wallets/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshWalletsTab(); showToast('Wallet deleted', 'success'); })
         .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete wallet', 'error'));
     });
   }
   
-  if (target.classList.contains('edit-transaction')) openEditTransaction(target.dataset.id);
+  if (target.classList.contains('edit-transaction')) {
+    openEditTransaction(target.dataset.id);
+  }
   
   if (target.classList.contains('delete-transaction')) {
     openConfirm('Delete transaction', 'Delete this transaction? This action cannot be undone.', '', () => {
-      fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
+      return fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshTransactionsTab(); showToast('Transaction deleted', 'success'); })
         .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete transaction', 'error'));
     });
@@ -497,6 +589,8 @@ document.addEventListener('click', (event) => {
     
     if (!title) return showToast('Task title cannot be empty', 'error');
     
+    target.classList.add('btn-loading');
+    
     const payload = { title, due_date: (dueInput && dueInput.value) || '' };
     fetchJSON(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       .then(() => {
@@ -504,7 +598,8 @@ document.addEventListener('click', (event) => {
         showToast('Task updated', 'success');
         refreshTasks();
       })
-      .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to update task', 'error'));
+      .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to update task', 'error'))
+      .finally(() => target.classList.remove('btn-loading'));
   }
   
   if (target.classList.contains('settle-loan')) openLoanSettlePanel(target.dataset.counterparty);
@@ -548,8 +643,7 @@ fundingOptionsList && fundingOptionsList.addEventListener('click', async (event)
   
   const { payload, method, url } = pendingTransaction;
   
-  button.disabled = true;
-  button.textContent = 'Processing...';
+  button.classList.add('btn-loading');
   
   const mechanism = button.dataset.mechanism;
   const sourceWalletId = button.dataset.sourceWalletId;
@@ -584,9 +678,9 @@ fundingOptionsList && fundingOptionsList.addEventListener('click', async (event)
     showToast('Remediation and transaction applied successfully', 'success');
     
   } catch (err) {
-    button.disabled = false;
-    button.textContent = 'Commit & Pay';
     showToast(sanitizeErrorMsg(err.message) || 'Remediation failed', 'error');
+  } finally {
+    button.classList.remove('btn-loading');
   }
 });
 
@@ -599,43 +693,51 @@ settleCancel && settleCancel.addEventListener('click', () => {
   if (loanSettlePanel) loanSettlePanel.classList.add('hidden');
 });
 
-settleSend && settleSend.addEventListener('click', () => {
+settleSend && settleSend.addEventListener('click', async () => {
   const amount = parseFloat(settleAmount.value);
   const source = settleSource.value;
   const counterparty = settleCounterparty.textContent;
   if (!amount || amount <= 0) return showToast('Enter a positive amount', 'error');
   if (!source) return showToast('Select a source wallet', 'error');
   
+  settleSend.classList.add('btn-loading');
+
   const payload = {
     type: 'Debit', amount, source_wallet_id: source, category: 'Settle', 
     counterparty, date: new Date().toISOString().split('T')[0], details: 'Loan settlement'
   };
   
-  fetchJSON('/api/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    .then(() => {
-      if (loanSettlePanel) loanSettlePanel.classList.add('hidden');
-      refreshData();
-      showToast('Loan settlement recorded', 'success');
-    })
-    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error'));
+  try {
+    await fetchJSON('/api/transactions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (loanSettlePanel) loanSettlePanel.classList.add('hidden');
+    refreshData();
+    showToast('Loan settlement recorded', 'success');
+  } catch (err) {
+    showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error');
+  } finally {
+    settleSend.classList.remove('btn-loading');
+  }
 });
 
-monthEndButton && monthEndButton.addEventListener('click', () => {
+monthEndButton && monthEndButton.addEventListener('click', async () => {
   if (systemStatus) {
     systemStatus.textContent = 'Running month-end sweep...';
     systemStatus.style.color = '#111827';
   }
-  fetchJSON('/api/schedule/end', { method: 'POST' })
-    .then(() => { 
-      if (systemStatus) systemStatus.textContent = 'Month-end sweep completed.'; 
-      refreshTransactionsTab(); 
-    })
-    .catch((err) => {
-      if (systemStatus) {
-        systemStatus.textContent = `Month-end failed: ${sanitizeErrorMsg(err.message)}`;
-        systemStatus.style.color = '#dc2626';
-      }
-    });
+  monthEndButton.classList.add('btn-loading');
+
+  try {
+    await fetchJSON('/api/schedule/end', { method: 'POST' });
+    if (systemStatus) systemStatus.textContent = 'Month-end sweep completed.'; 
+    refreshTransactionsTab(); 
+  } catch (err) {
+    if (systemStatus) {
+      systemStatus.textContent = `Month-end failed: ${sanitizeErrorMsg(err.message)}`;
+      systemStatus.style.color = '#dc2626';
+    }
+  } finally {
+    monthEndButton.classList.remove('btn-loading');
+  }
 });
 
 interWalletSettleCancel && interWalletSettleCancel.addEventListener('click', () => {
@@ -643,27 +745,32 @@ interWalletSettleCancel && interWalletSettleCancel.addEventListener('click', () 
   if (interWalletSettlePanel) interWalletSettlePanel.classList.add('hidden');
 });
 
-interWalletSettleSend && interWalletSettleSend.addEventListener('click', () => {
+interWalletSettleSend && interWalletSettleSend.addEventListener('click', async () => {
   const amount = parseFloat(interWalletSettleAmount.value);
   if (!amount || amount <= 0) return showToast('Enter a positive amount', 'error');
   if (!pendingInterWalletSettlement) return showToast('No loan selected to settle', 'error');
   
+  interWalletSettleSend.classList.add('btn-loading');
+
   const payload = { borrower_wallet_id: pendingInterWalletSettlement.borrowerId, lender_wallet_id: pendingInterWalletSettlement.lenderId, amount };
   
-  fetchJSON('/api/inter-wallet-loans/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-    .then(() => {
-      setPendingInterWalletSettlement(null);
-      if (interWalletSettlePanel) interWalletSettlePanel.classList.add('hidden');
-      refreshData();
-      showToast('Inter-Wallet Loan settlement recorded', 'success');
-    })
-    .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error'));
+  try {
+    await fetchJSON('/api/inter-wallet-loans/settle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    setPendingInterWalletSettlement(null);
+    if (interWalletSettlePanel) interWalletSettlePanel.classList.add('hidden');
+    refreshData();
+    showToast('Inter-Wallet Loan settlement recorded', 'success');
+  } catch (err) {
+    showToast(sanitizeErrorMsg(err.message) || 'Failed to settle loan', 'error');
+  } finally {
+    interWalletSettleSend.classList.remove('btn-loading');
+  }
 });
 
 deleteAllTasksBtn && deleteAllTasksBtn.addEventListener('click', () => {
   if (!currentTasks.length) return showToast('No tasks to delete', 'error');
   openConfirm('Delete all tasks', `Delete all ${currentTasks.length} task${currentTasks.length === 1 ? '' : 's'}? This cannot be undone.`, '', () => {
-    fetchJSON(`/api/tasks`, { method: 'DELETE' })
+    return fetchJSON(`/api/tasks`, { method: 'DELETE' })
       .then(() => { showToast('All tasks deleted', 'success'); refreshTasks(); })
       .catch((err) => { showToast(sanitizeErrorMsg(err.message) || 'Failed to delete all tasks', 'error'); refreshTasks(); });
   });
@@ -682,7 +789,6 @@ function init() {
   
   buildSelectOptions(txType, transactionTypes, false);
   buildSelectOptions(walletMode, walletModeOptions, false);
-  buildSelectOptions(txPaymentMode, paymentModes, false);
   buildSelectOptions(txPaymentInstrument, paymentInstruments, false);
   
   updateTransactionFormFields();

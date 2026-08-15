@@ -24,3 +24,5 @@ logs/
 # Docker files
 docker-compose.override.yml
 Dockerfile
+
+redis_data/

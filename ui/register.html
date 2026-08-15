@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Register</title>
+
 <style>
   body { 
     font-family: Inter, system-ui, sans-serif; 
@@ -56,7 +57,33 @@
   p { text-align: center; margin-top: 1.5rem; font-size: 0.95rem; }
   a { color: #4f46e5; text-decoration: none; font-weight: 500; }
   a:hover { text-decoration: underline; }
+  
+  /* Loading State */
+  .btn-loading {
+    position: relative !important;
+    color: transparent !important;
+    pointer-events: none !important;
+  }
+  .btn-loading::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1.2em;
+    height: 1.2em;
+    margin-left: -0.6em;
+    margin-top: -0.6em;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: #ffffff;
+    border-radius: 50%;
+    animation: btn-spin 0.6s linear infinite;
+  }
+  @keyframes btn-spin {
+    to { transform: rotate(360deg); }
+  }
 </style>
+
+<link rel="icon" type="image/png" href="favicon.png" />
 </head>
 <body>
   <div class="auth-container">
@@ -74,22 +101,31 @@
   <script>
     document.getElementById('register-form').addEventListener('submit', async (e) => {
       e.preventDefault();
+      
       const errorEl = document.getElementById('error');
       errorEl.textContent = '';
+      
+      const btn = e.target.querySelector('button[type="submit"]');
+      if (btn) btn.classList.add('btn-loading');
+      
       const form = new FormData(e.target);
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: form.get('username'),
-          password: form.get('password'),
-        }),
-      });
-      if (res.ok) {
-        window.location.href = '/login.html';
-        return;
+      try {
+        const res = await fetch('/api/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: form.get('username'),
+            password: form.get('password'),
+          }),
+        });
+        if (res.ok) {
+          window.location.href = '/login.html';
+          return;
+        }
+        errorEl.textContent = await res.text();
+      } finally {
+        if (btn) btn.classList.remove('btn-loading');
       }
-      errorEl.textContent = await res.text();
     });
   </script>
 </body>

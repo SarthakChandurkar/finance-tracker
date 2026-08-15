@@ -5,11 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Finance Tracker</title>
   <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" type="image/png" href="favicon.png" />
 </head>
 <body>
+  <div class="nav-overlay" id="nav-overlay"></div>
+
   <div class="app-shell">
     <header>
       <div class="header-left">
+        <button id="hamburger-toggle" class="hamburger" type="button" aria-label="Toggle menu">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="12" x2="20" y2="12"></line>
+            <line x1="4" y1="6" x2="20" y2="6"></line>
+            <line x1="4" y1="18" x2="20" y2="18"></line>
+          </svg>
+        </button>
         <h1>Finance Tracker</h1>
       </div>
       <div class="header-right">
@@ -22,11 +32,6 @@
             <button id="profile-logout" type="button">Logout</button>
           </div>
         </div>
-        <button id="hamburger-toggle" class="hamburger" type="button" aria-label="Toggle menu">
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
       </div>
     </header>
     
@@ -34,53 +39,286 @@
       <button data-view="dashboard" class="active">Dashboard</button>
       <button data-view="transactions">Transactions</button>
       <button data-view="wallets">Wallets</button>
-      <button data-view="loan-ledger">Loan-Ledger</button>
+      <button data-view="loan-ledger-tab">Loan-Ledger</button>
       <button data-view="categories">Categories</button>
       <button data-view="tasks">Tasks</button>
       <button data-view="system">System Actions</button>
     </nav>
 
     <main>
+      <!-- DASHBOARD TAB -->
       <section id="dashboard" class="view active">
-        <h2>Dashboard</h2>
-        <div class="dashboard-grid">
-          <div class="card">
-            <h3>Wallet Breakdowns</h3>
-            <div id="wallet-breakdowns"></div>
-          </div>
-          <div class="card">
-            <h3>Category Totals</h3>
-            <div id="category-totals"></div>
-          </div>
-          <div class="card">
-            <h3>Today's Tasks</h3>
-            <div id="today-tasks"></div>
-          </div>
-          <div class="card">
-            <h3>Loan Ledger</h3>
-            <div class="dashboard-section mt-1">
-              <h4 class="section-title">External Loans</h4>
-              <div id="loan-ledger"></div>
+        <div class="dashboard-layout">
+          <div class="dash-left">
+            <div class="dash-left-row">
+              <div class="card dash-card" id="card-l11">
+                <h3 class="dash-card-header">Monthly Wallets</h3>
+                <div id="monthly-wallets" class="dash-card-body"></div>
+              </div>
+              <div class="card dash-card" id="card-l12">
+                <h3 class="dash-card-header">Monthly Totals</h3>
+                <div id="monthly-totals" class="dash-card-body"></div>
+              </div>
             </div>
-            <div class="dashboard-section mt-3">
-              <h4 class="section-title">Inter-Wallet Loans</h4>
-              <div id="interwallet-loan-ledger"></div>
+            <div class="dash-left-row">
+              <div class="card dash-card" id="card-l21">
+                <h3 class="dash-card-header">Global Wallets</h3>
+                <div id="global-wallets" class="dash-card-body"></div>
+              </div>
+              <div class="card dash-card" id="card-l22">
+                <h3 class="dash-card-header">Global Totals</h3>
+                <div id="global-totals" class="dash-card-body"></div>
+              </div>
+            </div>
+          </div>
+          <div class="dash-right">
+            <div class="card dash-card" id="card-r11">
+              <h3 class="dash-card-header">Today's Tasks</h3>
+              <div id="today-tasks" class="dash-card-body"></div>
+            </div>
+            <div class="card dash-card" id="card-r12">
+              <h3 class="dash-card-header">Loan Ledger</h3>
+              <div class="dash-card-body">
+                <div class="dashboard-section mt-1">
+                  <h4 class="section-title">External Loans</h4>
+                  <div id="loan-ledger"></div>
+                </div>
+                <div class="dashboard-section mt-3">
+                  <h4 class="section-title">Inter-Wallet Loans</h4>
+                  <div id="interwallet-loan-ledger"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="loan-ledger" class="view">
-        <h2>Loan Ledger</h2>
-        <div class="panel">
-          <h3 class="section-title">External Loans</h3>
-          <div id="loan-ledger-settle"></div>
+      <!-- TRANSACTIONS TAB -->
+      <section id="transactions" class="view">
+        <div class="split-layout">
+          <div class="split-left">
+            <div class="panel">
+              <form id="transaction-form" class="form-grid two-col-grid">
+                <div class="full-width">
+                  <h4 id="transaction-form-heading">Create Transaction</h4>
+                </div>
+                <div>
+                  <label for="tx-type">Type</label>
+                  <select id="tx-type" name="type"></select>
+                </div>
+                <div>
+                  <label for="tx-amount">Amount</label>
+                  <input id="tx-amount" name="amount" type="number" step="0.01" required />
+                </div>
+                <div>
+                  <label for="tx-source">Source Wallet</label>
+                  <select id="tx-source" name="source_wallet_id"></select>
+                </div>
+                <div>
+                  <label for="tx-destination">Destination Wallet</label>
+                  <select id="tx-destination" name="destination_wallet_id"></select>
+                </div>
+                <div>
+                  <label for="tx-category">Category</label>
+                  <select id="tx-category" name="category"></select>
+                </div>
+                <div>
+                  <label for="tx-counterparty">Counterparty</label>
+                  <input id="tx-counterparty" name="counterparty" type="text" />
+                </div>
+                <div>
+                  <label for="tx-payment-instrument">Payment Instrument</label>
+                  <select id="tx-payment-instrument" name="payment_instrument"></select>
+                </div>
+                <div>
+                  <label for="tx-date">Date</label>
+                  <input id="tx-date" name="date" type="date" required />
+                </div>
+                <div class="full-width">
+                  <label for="tx-details">Details</label>
+                  <textarea id="tx-details" name="details"></textarea>
+                </div>
+                <div class="full-width actions">
+                  <button id="tx-submit" type="submit">Save Transaction</button>
+                  <button id="tx-cancel" class="secondary-btn" type="button">Cancel</button>
+                </div>
+                <div class="form-error" id="tx-error"></div>
+              </form>
+            </div>
+
+            <div class="panel hidden" id="funding-panel">
+              <h3>Insufficient Balance</h3>
+              <p id="funding-message" class="note"></p>
+              <div class="table-wrapper mt-3" id="funding-table-container">
+                <table id="funding-table">
+                  <thead>
+                    <tr>
+                      <th>Mechanism</th>
+                      <th>Source Wallet</th>
+                      <th>Available</th>
+                      <th>Required</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="funding-options-list"></tbody>
+                </table>
+              </div>
+              <div class="full-width actions mt-3">
+                <button id="funding-cancel" class="secondary-btn" type="button">Cancel</button>
+              </div>
+            </div>
+          </div>
           
-          <h3 class="section-title mt-4">Inter-Wallet Loans</h3>
-          <div id="interwallet-loan-ledger-settle"></div>
+          <div class="split-right">
+            <div class="panel" style="height: 100%; display: flex; flex-direction: column;">
+              <h3 style="margin-top: 0;">Recent Transactions</h3>
+              <div class="table-wrapper" style="flex: 1 1 auto; overflow-y: auto;">
+                <table id="transaction-table" class="expandable-table">
+                  <thead style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                      <th class="sortable" data-sort="date">Date <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="type">Type <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="amount">Amount <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="source_wallet_id">Source <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="destination_wallet_id">Destination <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="payment_instrument">Instrument <span class="sort-icon"></span></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
+      <!-- WALLETS TAB -->
+      <section id="wallets" class="view">
+        <div class="split-layout">
+          <div class="split-left">
+            <div class="panel">
+              <form id="wallet-form" class="form-grid two-col-grid">
+                <div class="full-width">
+                  <h4 id="wallet-form-heading">Create Wallet</h4>
+                </div>
+                <div>
+                  <label for="wallet-mode">Mode</label>
+                  <select id="wallet-mode" name="mode"></select>
+                  <div id="wallet-mode-note" class="note"></div>
+                </div>
+                <div>
+                  <label for="wallet-name">Name</label>
+                  <input id="wallet-name" name="name" type="text" required />
+                </div>
+                <div>
+                  <label for="wallet-target-amount">Target Amount</label>
+                  <input id="wallet-target-amount" name="target_amount" type="number" step="0.01" />
+                </div>
+                <div>
+                  <label for="wallet-eom-destination">EOM Sweep Destination</label>
+                  <select id="wallet-eom-destination" name="eom_sweep_destination"></select>
+                </div>
+                <div class="full-width actions">
+                  <button id="wallet-submit" type="submit">Create Wallet</button>
+                  <button id="wallet-cancel" class="secondary-btn" type="button">Cancel</button>
+                </div>
+                <div class="form-error" id="wallet-error"></div>
+              </form>
+            </div>
+          </div>
+
+          <div class="split-right">
+            <div class="panel" style="height: 100%; display: flex; flex-direction: column;">
+              <h3 style="margin-top: 0;">Active Wallets</h3>
+              <div class="table-wrapper" style="flex: 1 1 auto; overflow-y: auto;">
+                <table id="wallet-table" class="expandable-table">
+                  <thead style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                      <th class="sortable" data-sort="name">Name <span class="sort-icon"></span></th>
+                      <th class="sortable" data-sort="scope">Scope <span class="sort-icon"></span></th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- LOAN LEDGER TAB -->
+      <section id="loan-ledger-tab" class="view">
+        <div class="split-layout even">
+          <div class="split-left">
+            <div class="panel" style="height: 100%;">
+              <h3 class="section-title">External Loans</h3>
+              <div id="loan-ledger-settle"></div>
+            </div>
+          </div>
+          <div class="split-right">
+            <div class="panel" style="height: 100%;">
+              <h3 class="section-title">Inter-Wallet Loans</h3>
+              <div id="interwallet-loan-ledger-settle"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CATEGORIES TAB -->
+      <section id="categories" class="view">
+        <div class="split-layout">
+          <div class="split-left">
+            <div class="panel">
+              <h3 style="margin-top:0;">Create Category</h3>
+              <form id="category-form" class="form-grid">
+                <div>
+                  <label for="category-name">Name</label>
+                  <input id="category-name" name="name" type="text" required />
+                </div>
+                <div class="full-width actions">
+                  <button type="submit">Create Category</button>
+                </div>
+              </form>
+            </div>
+
+            <div class="panel">
+              <h3 style="margin-top:0;">Rename / Delete</h3>
+              <form id="recategorize-form" class="form-grid">
+                <div>
+                  <label for="source-category">From</label>
+                  <select id="source-category" name="source_category_id"></select>
+                </div>
+                <div>
+                  <label for="dest-category">To</label>
+                  <select id="dest-category" name="dest_category_id"></select>
+                </div>
+                <div class="full-width actions">
+                  <button type="submit">Recategorize</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <div class="split-right">
+            <div class="panel" style="height: 100%; display: flex; flex-direction: column;">
+              <h3 style="margin-top: 0;">Categories</h3>
+              <div class="table-wrapper" style="flex: 1 1 auto; overflow-y: auto;">
+                <table id="category-table" class="compact-table">
+                  <thead style="position: sticky; top: 0; z-index: 10;">
+                    <tr>
+                      <th>Name</th>
+                      <th class="actions-cell">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SYSTEM TAB -->
       <section id="system" class="view">
         <h2>System Actions</h2>
         <div class="panel schedule-panel">
@@ -92,204 +330,7 @@
         </div>
       </section>
 
-      <section id="transactions" class="view">
-        <h2>Transactions</h2>
-        <div class="panel">
-          <form id="transaction-form" class="form-grid">
-            <div class="full-width">
-              <h4 id="transaction-form-heading">Create Transaction</h4>
-            </div>
-            <div>
-              <label for="tx-type">Type</label>
-              <select id="tx-type" name="type"></select>
-            </div>
-            <div>
-              <label for="tx-amount">Amount</label>
-              <input id="tx-amount" name="amount" type="number" step="0.01" required />
-            </div>
-            <div>
-              <label for="tx-source">Source Wallet</label>
-              <select id="tx-source" name="source_wallet_id"></select>
-            </div>
-            <div>
-              <label for="tx-destination">Destination Wallet</label>
-              <select id="tx-destination" name="destination_wallet_id"></select>
-            </div>
-            <div>
-              <label for="tx-category">Category</label>
-              <select id="tx-category" name="category"></select>
-            </div>
-            <div>
-              <label for="tx-counterparty">Counterparty</label>
-              <input id="tx-counterparty" name="counterparty" type="text" />
-            </div>
-            <div>
-              <label for="tx-payment-mode">Payment Mode</label>
-              <select id="tx-payment-mode" name="payment_mode"></select>
-            </div>
-            <div>
-              <label for="tx-payment-instrument">Payment Instrument</label>
-              <select id="tx-payment-instrument" name="payment_instrument"></select>
-            </div>
-            <div>
-              <label for="tx-date">Date</label>
-              <input id="tx-date" name="date" type="date" required />
-            </div>
-            <div class="full-width">
-              <label for="tx-details">Details</label>
-              <textarea id="tx-details" name="details"></textarea>
-            </div>
-            <div class="full-width actions">
-              <button id="tx-submit" type="submit">Save Transaction</button>
-              <button id="tx-cancel" class="secondary-btn" type="button">Cancel</button>
-            </div>
-            <div class="form-error" id="tx-error"></div>
-          </form>
-        </div>
-
-        <div class="panel hidden" id="funding-panel">
-          <h3>Insufficient Balance</h3>
-          <p id="funding-message" class="note"></p>
-          <div class="table-wrapper mt-3" id="funding-table-container">
-            <table id="funding-table">
-              <thead>
-                <tr>
-                  <th>Mechanism</th>
-                  <th>Source Wallet</th>
-                  <th>Available</th>
-                  <th>Required</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="funding-options-list"></tbody>
-            </table>
-          </div>
-          <div class="full-width actions mt-3">
-            <button id="funding-cancel" class="secondary-btn" type="button">Cancel</button>
-          </div>
-        </div>
-
-        <div class="panel">
-          <h3>Recent Transactions</h3>
-          <div class="table-wrapper">
-            <table id="transaction-table">
-              <thead>
-                <tr>
-                  <th class="sortable" data-sort="date">Date <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="type">Type <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="amount">Amount <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="source_wallet_id">Source <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="destination_wallet_id">Destination <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="category">Category <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="counterparty">Counterparty <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="details">Details <span class="sort-icon"></span></th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section id="wallets" class="view">
-        <h2>Wallets</h2>
-        <div class="panel">
-          <form id="wallet-form" class="form-grid">
-            <div class="full-width">
-              <h4 id="wallet-form-heading">Create Wallet</h4>
-            </div>
-            <div>
-              <label for="wallet-mode">Mode</label>
-              <select id="wallet-mode" name="mode"></select>
-              <div id="wallet-mode-note" class="note"></div>
-            </div>
-            <div>
-              <label for="wallet-name">Name</label>
-              <input id="wallet-name" name="name" type="text" required />
-            </div>
-            <div>
-              <label for="wallet-target-amount">Target Amount</label>
-              <input id="wallet-target-amount" name="target_amount" type="number" step="0.01" />
-            </div>
-            <div>
-              <label for="wallet-eom-destination">EOM Sweep Destination</label>
-              <select id="wallet-eom-destination" name="eom_sweep_destination"></select>
-            </div>
-            <div class="full-width actions">
-              <button id="wallet-submit" type="submit">Create Wallet</button>
-              <button id="wallet-cancel" class="secondary-btn" type="button">Cancel</button>
-            </div>
-            <div class="form-error" id="wallet-error"></div>
-          </form>
-        </div>
-
-        <div class="panel">
-          <h3>Active Wallets</h3>
-          <div class="table-wrapper">
-            <table id="wallet-table">
-              <thead>
-                <tr>
-                  <th class="sortable" data-sort="name">Name <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="scope">Scope <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="target_amount">Target Amount <span class="sort-icon"></span></th>
-                  <th class="sortable" data-sort="eom_sweep_destination">EOM Destination <span class="sort-icon"></span></th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
-      <section id="categories" class="view">
-        <h2>Categories</h2>
-        <div class="panel">
-          <form id="category-form" class="form-grid">
-            <div>
-              <label for="category-name">Name</label>
-              <input id="category-name" name="name" type="text" required />
-            </div>
-            <div class="full-width actions">
-              <button type="submit">Create Category</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="panel">
-          <h3>Rename / Delete</h3>
-          <form id="recategorize-form" class="form-grid">
-            <div>
-              <label for="source-category">From</label>
-              <select id="source-category" name="source_category_id"></select>
-            </div>
-            <div>
-              <label for="dest-category">To</label>
-              <select id="dest-category" name="dest_category_id"></select>
-            </div>
-            <div class="full-width actions">
-              <button type="submit">Recategorize</button>
-            </div>
-          </form>
-        </div>
-
-        <div class="panel">
-          <h3>Categories</h3>
-          <div class="table-wrapper">
-            <table id="category-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
-
+      <!-- TASKS TAB -->
       <section id="tasks" class="view">
         <h2>Tasks</h2>
         <div class="panel">
@@ -300,7 +341,6 @@
           </form>
           <div class="form-error" id="task-error"></div>
         </div>
-
         <div class="panel">
           <div class="tasks-header">
             <h3>All Tasks</h3>
@@ -312,6 +352,7 @@
     </main>
   </div>
 
+  <!-- MODALS -->
   <div id="loan-settle-panel" class="modal-overlay hidden">
     <div class="modal">
       <h3>Settle Loan</h3>
@@ -365,24 +406,5 @@
   </div>
   <div id="toasts" aria-live="polite" aria-atomic="true"></div>
   <script type="module" src="/main.js"></script>
-  <script>
-    (function(){
-      const toasts = document.getElementById('toasts');
-      if (!window.showToast) {
-        window.showToast = function(msg, type='success', ms=3000){
-          const el = document.createElement('div'); el.className = 'toast ' + (type||'success'); el.textContent = msg; toasts.appendChild(el);
-          setTimeout(()=>el.remove(), ms);
-        };
-      }
-      const nav = document.querySelectorAll('nav button');
-      function setActive(viewId){
-        document.querySelectorAll('.view').forEach(v=> v.classList.toggle('active', v.id===viewId));
-        nav.forEach(b=> b.classList.toggle('active', b.dataset.view===viewId));
-      }
-      nav.forEach(b=> b.addEventListener('click', ()=> setActive(b.dataset.view)));
-      const txDate = document.getElementById('tx-date');
-      if (txDate && !txDate.value) txDate.value = new Date().toISOString().split('T')[0];
-    })();
-  </script>
 </body>
 </html>

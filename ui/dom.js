@@ -3,6 +3,7 @@
 export const views = document.querySelectorAll('.view');
 export const navButtons = document.querySelectorAll('nav button');
 export const navMenu = document.querySelector('nav');
+export const navOverlay = document.getElementById('nav-overlay');
 export const hamburgerToggle = document.getElementById('hamburger-toggle');
 
 // Profile Menu
@@ -16,7 +17,6 @@ export const txType = document.getElementById('tx-type');
 export const txSource = document.getElementById('tx-source');
 export const txDestination = document.getElementById('tx-destination');
 export const txCategory = document.getElementById('tx-category');
-export const txPaymentMode = document.getElementById('tx-payment-mode');
 export const txPaymentInstrument = document.getElementById('tx-payment-instrument');
 export const txDate = document.getElementById('tx-date');
 export const transactionForm = document.getElementById('transaction-form');
@@ -42,15 +42,17 @@ export const transactionTableBody = document.querySelector('#transaction-table t
 export const categoryTableBody = document.querySelector('#category-table tbody');
 
 // Dashboards & Ledgers
-export const walletBreakdowns = document.getElementById('wallet-breakdowns');
-export const categoryTotals = document.getElementById('category-totals');
+export const monthlyWalletsEl = document.getElementById('monthly-wallets');
+export const globalWalletsEl = document.getElementById('global-wallets');
+export const monthlyTotalsEl = document.getElementById('monthly-totals');
+export const globalTotalsEl = document.getElementById('global-totals');
+
 export const loanLedger = document.getElementById('loan-ledger');
 export const interWalletLoanLedger = document.getElementById('interwallet-loan-ledger');
 
 // Loan Settle and Show Elements
 export const loanLedger_settle = document.getElementById('loan-ledger-settle');
 export const interWalletLoanLedger_settle = document.getElementById('interwallet-loan-ledger-settle');
-
 
 // Funding & Settlement Panels
 export const fundingPanel = document.getElementById('funding-panel');

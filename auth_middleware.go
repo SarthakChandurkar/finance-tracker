@@ -23,9 +23,9 @@ var authPages = map[string]bool{
 // session (the login/register API endpoints themselves), regardless of
 // whether the caller happens to be authenticated.
 var publicPaths = map[string]bool{
-	"/api/login":    true,
-	"/api/register": true,
-	"/api/status":   true,
+	"/api/login": true,
+	// "/api/register": true,
+	"/api/status": true,
 }
 
 // publicAssetSuffixes lets static files the login/register pages depend
