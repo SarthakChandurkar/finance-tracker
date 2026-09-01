@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"financetracker/internal/domain"
 )
@@ -17,6 +18,24 @@ func cookieSecure() bool {
 	return os.Getenv("ENV") != "development"
 }
 
+// cookieSameSite defaults to Strict - the strongest CSRF protection a
+// cookie can get, appropriate since the UI and API are served from the
+// same origin and never need the cookie sent on a cross-site request.
+// Override with COOKIE_SAMESITE=lax only if you split the frontend onto
+// a different subdomain that still needs top-level-navigation cookies
+// (e.g. following a link in from elsewhere); "none" additionally
+// requires Secure and real cross-site use, which this app doesn't do.
+func cookieSameSite() http.SameSite {
+	switch strings.ToLower(os.Getenv("COOKIE_SAMESITE")) {
+	case "lax":
+		return http.SameSiteLaxMode
+	case "none":
+		return http.SameSiteNoneMode
+	default:
+		return http.SameSiteStrictMode
+	}
+}
+
 func sessionCookie(token string, maxAge int) *http.Cookie {
 	return &http.Cookie{
 		Name:     sessionCookieName,
@@ -24,7 +43,7 @@ func sessionCookie(token string, maxAge int) *http.Cookie {
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   cookieSecure(),
-		SameSite: http.SameSiteLaxMode,
+		SameSite: cookieSameSite(),
 		MaxAge:   maxAge,
 	}
 }
