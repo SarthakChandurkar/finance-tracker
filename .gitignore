@@ -19,7 +19,7 @@ logs/
 *.swo
 
 .env
-
+*.zip
 
 # Docker files
 docker-compose.override.yml

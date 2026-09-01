@@ -76,11 +76,22 @@ func (s *apiServer) sessionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		userID, ok := s.currentUserID(r)
+		token, userID, ok := s.currentSession(r)
 		if !ok {
 			respondUnauthenticated(w, r)
 			return
 		}
+
+		// The Redis-side session TTL already slides forward on every
+		// lookup (see SessionStore.UserID), but the *cookie* the browser
+		// holds does not - its MaxAge was fixed once, at login. That
+		// mismatch is the "session/access token never refreshes" bug:
+		// the browser silently drops the cookie sessionTTLSeconds after
+		// login even though the server-side session is still alive and
+		// the user has been active the whole time. Re-issuing the same
+		// token with a fresh MaxAge on every authenticated request keeps
+		// the client-side expiry in lockstep with the server-side one.
+		http.SetCookie(w, sessionCookie(token, sessionTTLSeconds))
 
 		ctx := context.WithValue(r.Context(), userIDCtxKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
@@ -89,11 +100,20 @@ func (s *apiServer) sessionMiddleware(next http.Handler) http.Handler {
 
 // currentUserID resolves the session cookie on r (if any) to a user ID.
 func (s *apiServer) currentUserID(r *http.Request) (string, bool) {
-	var token string
+	_, userID, ok := s.currentSession(r)
+	return userID, ok
+}
+
+// currentSession resolves the session cookie on r (if any) to its raw
+// token plus the user ID it belongs to. Callers that only need the user
+// ID can use currentUserID instead; sessionMiddleware needs the token
+// too, so it can re-issue the cookie with a refreshed MaxAge.
+func (s *apiServer) currentSession(r *http.Request) (token string, userID string, ok bool) {
 	if cookie, err := r.Cookie(sessionCookieName); err == nil {
 		token = cookie.Value
 	}
-	return s.authService.CurrentUser(r.Context(), token)
+	userID, ok = s.authService.CurrentUser(r.Context(), token)
+	return token, userID, ok
 }
 
 // userIDFromContext reads the authenticated user's ID that

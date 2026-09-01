@@ -117,6 +117,8 @@ func main() {
 	sessionTTLSeconds = int(sessionTTL.Seconds())
 	sessionStore := storage.NewSessionStore(rdb, sessionTTL)
 
+	loadAllowedOrigins()
+
 	server := &apiServer{
 		store:       store,
 		tasks:       remote.NewTodoClient(todoServerURL, todoServerTimeout),
@@ -193,7 +195,11 @@ func (s *apiServer) routes() http.Handler {
 
 	mux.Handle("/", noCacheFileServer("ui"))
 
-	return loggingMiddleware(s.reloadMiddleware(s.sessionMiddleware(mux)))
+	// Order matters: CORS and security headers wrap everything, and CORS
+	// specifically must sit *outside* sessionMiddleware so that preflight
+	// OPTIONS requests (which never carry the session cookie) get
+	// answered without being rejected as unauthenticated.
+	return loggingMiddleware(corsMiddleware(securityHeadersMiddleware(s.reloadMiddleware(s.sessionMiddleware(mux)))))
 }
 
 // noCacheFileServer wraps a static file server so every response tells
