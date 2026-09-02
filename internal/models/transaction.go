@@ -9,25 +9,20 @@ import (
 
 const dateOnlyLayout = "2006-01-02"
 
+// ParseFlexibleDate parses a plain calendar date input (e.g. from a date
+// picker), which never carries a time component — the actual transaction
+// time is captured separately in Transaction.RecordedAt (see ApplyDefaults).
+// It is intentionally strict to YYYY-MM-DD: there is no "time" to lose here
+// because none is expected on this field.
 func ParseFlexibleDate(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	if t, err := time.Parse(dateOnlyLayout, s); err == nil {
-		return t, nil
+	t, err := time.Parse(dateOnlyLayout, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD)", s)
 	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return truncateToDate(t), nil
-	}
-	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
-		return truncateToDate(t), nil
-	}
-	return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD)", s)
-}
-
-func truncateToDate(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return t, nil
 }
 
 type TransactionType string
@@ -89,12 +84,25 @@ type Transaction struct {
 	PaymentInstrument   PaymentInstrument `json:"payment_instrument,omitempty"`
 	Date                time.Time         `json:"date"`
 	Details             string            `json:"details,omitempty"`
+
+	// RecordedAt is the exact instant the transaction was recorded, always
+	// stored in UTC/GMT (so the backend has a single, unambiguous instant
+	// regardless of which timezone the server or client is in). It is
+	// additive and optional (json "omitempty") so records written before
+	// this field existed — which have no "recorded_at" key — continue to
+	// decode fine with a zero value.
+	//
+	// Converting this to a 12-hour clock string in the viewer's local
+	// timezone is a display concern and is left to the frontend
+	// (RecordedAt.In(userLocation).Format("03:04 PM") client-side).
+	RecordedAt time.Time `json:"recorded_at,omitempty"`
 }
 
 func (tx *Transaction) UnmarshalJSON(data []byte) error {
 	type Alias Transaction
 	aux := struct {
-		Date string `json:"date"`
+		Date   string      `json:"date"`
+		Amount json.Number `json:"amount"`
 		*Alias
 	}{
 		Alias: (*Alias)(tx),
@@ -107,6 +115,15 @@ func (tx *Transaction) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	tx.Date = parsed
+
+	if raw := aux.Amount.String(); raw != "" {
+		amount, err := ParseMoneyToken(raw)
+		if err != nil {
+			return err
+		}
+		tx.Amount = amount
+	}
+
 	return nil
 }
 
@@ -131,7 +148,14 @@ func (tx *Transaction) ApplyDefaults() {
 		tx.PaymentMode = PaymentModeSelf
 	}
 	if tx.Date.IsZero() {
-		tx.Date = time.Now()
+		tx.Date = time.Now().UTC()
+	}
+	if tx.RecordedAt.IsZero() {
+		// The actual moment the transaction is recorded, captured in
+		// UTC/GMT. Marshals as RFC3339 with a "Z" suffix, e.g.
+		// "2026-09-02T08:35:32Z" — an unambiguous instant that any
+		// frontend can convert into the viewer's local 12-hour time.
+		tx.RecordedAt = time.Now().UTC()
 	}
 	if tx.Type == Debit && tx.Category == "" {
 		tx.Category = DefaultCategory
@@ -141,6 +165,9 @@ func (tx *Transaction) ApplyDefaults() {
 func (tx Transaction) Validate() error {
 	if tx.Amount <= 0 {
 		return errors.New("amount is compulsory and must be greater than zero")
+	}
+	if err := ValidateMoneyFloat(tx.Amount); err != nil {
+		return err
 	}
 
 	switch tx.Type {
