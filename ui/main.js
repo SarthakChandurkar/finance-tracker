@@ -145,7 +145,7 @@ function updateTransactionFormFields() {
   }
   
   if (counterpartyLabel?.parentElement) {
-    const counterpartyHiddenTypes = ['Salary', 'Self Transfer', 'Inter-Wallet Loan'];
+    const counterpartyHiddenTypes = ['Self Transfer', 'Inter-Wallet Loan'];
     counterpartyLabel.parentElement.style.display = counterpartyHiddenTypes.includes(type) ? 'none' : '';
   }
   
