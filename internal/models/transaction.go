@@ -9,20 +9,48 @@ import (
 
 const dateOnlyLayout = "2006-01-02"
 
-// ParseFlexibleDate parses a plain calendar date input (e.g. from a date
-// picker), which never carries a time component — the actual transaction
-// time is captured separately in Transaction.RecordedAt (see ApplyDefaults).
-// It is intentionally strict to YYYY-MM-DD: there is no "time" to lose here
-// because none is expected on this field.
+// ParseFlexibleDate accepts either:
+//   - a plain calendar date "YYYY-MM-DD" (e.g. from a date picker), or
+//   - a full RFC3339 / RFC3339Nano timestamp.
+//
+// In the plain-date case (or an RFC3339 timestamp whose clock component is
+// exactly midnight, meaning no real time was supplied), it enriches the
+// parsed date with the *current* clock time — so the transaction still
+// records the exact moment it was recorded, not a bare midnight timestamp.
+// If a real time-of-day is present in the input (RFC3339 with a non-zero
+// clock), that exact time is preserved as-is.
 func ParseFlexibleDate(s string) (time.Time, error) {
 	if s == "" {
 		return time.Time{}, nil
 	}
-	t, err := time.Parse(dateOnlyLayout, s)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD)", s)
+
+	enrichWithExactTime := func(t time.Time) time.Time {
+		// Evaluate "now" in the same location as the parsed date (usually
+		// UTC for date-only input) so the enriched timestamp stays
+		// self-consistent.
+		now := time.Now().In(t.Location())
+		return time.Date(t.Year(), t.Month(), t.Day(), now.Hour(), now.Minute(), now.Second(), now.Nanosecond(), t.Location())
 	}
-	return t, nil
+
+	if t, err := time.Parse(dateOnlyLayout, s); err == nil {
+		return enrichWithExactTime(t), nil
+	}
+
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+			return enrichWithExactTime(t), nil
+		}
+		return t, nil
+	}
+
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 {
+			return enrichWithExactTime(t), nil
+		}
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf("could not parse date %q (expected YYYY-MM-DD or RFC3339)", s)
 }
 
 type TransactionType string
@@ -84,18 +112,6 @@ type Transaction struct {
 	PaymentInstrument   PaymentInstrument `json:"payment_instrument,omitempty"`
 	Date                time.Time         `json:"date"`
 	Details             string            `json:"details,omitempty"`
-
-	// RecordedAt is the exact instant the transaction was recorded, always
-	// stored in UTC/GMT (so the backend has a single, unambiguous instant
-	// regardless of which timezone the server or client is in). It is
-	// additive and optional (json "omitempty") so records written before
-	// this field existed — which have no "recorded_at" key — continue to
-	// decode fine with a zero value.
-	//
-	// Converting this to a 12-hour clock string in the viewer's local
-	// timezone is a display concern and is left to the frontend
-	// (RecordedAt.In(userLocation).Format("03:04 PM") client-side).
-	RecordedAt time.Time `json:"recorded_at,omitempty"`
 }
 
 func (tx *Transaction) UnmarshalJSON(data []byte) error {
@@ -148,14 +164,7 @@ func (tx *Transaction) ApplyDefaults() {
 		tx.PaymentMode = PaymentModeSelf
 	}
 	if tx.Date.IsZero() {
-		tx.Date = time.Now().UTC()
-	}
-	if tx.RecordedAt.IsZero() {
-		// The actual moment the transaction is recorded, captured in
-		// UTC/GMT. Marshals as RFC3339 with a "Z" suffix, e.g.
-		// "2026-09-02T08:35:32Z" — an unambiguous instant that any
-		// frontend can convert into the viewer's local 12-hour time.
-		tx.RecordedAt = time.Now().UTC()
+		tx.Date = time.Now()
 	}
 	if tx.Type == Debit && tx.Category == "" {
 		tx.Category = DefaultCategory
