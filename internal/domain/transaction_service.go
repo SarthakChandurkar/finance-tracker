@@ -30,35 +30,30 @@ func (e *InsufficientFundsError) Error() string {
 }
 
 func validateSelfTransfer(source, dest models.Wallet) error {
+
+	sourceDoubleScoped := source.IsMonthly() && (source.LinkedWalletID != models.SavingsWalletID)
+	destDoubleScoped := dest.IsMonthly() && (dest.LinkedWalletID != models.SavingsWalletID)
+
+	sourceMonthlyOnly := source.IsMonthly() && !sourceDoubleScoped
+
 	switch {
-	case source.IsGlobal() && dest.IsMonthly():
 
-		return nil
+	case source.ID == dest.ID:
+		return fmt.Errorf("a wallet cannot self-transfer to itself")
 
-	case source.IsMonthly() && dest.IsGlobal():
-
-		if dest.LinkedWalletID == source.ID {
-			return fmt.Errorf("cannot manually self-transfer from a Monthly wallet into its own linked Global wallet — this happens automatically at month-end")
-		}
-		return nil
-
-	case source.IsGlobal() && dest.IsGlobal():
-		return nil
-
-	case source.IsMonthly() && dest.IsMonthly():
-
-		if source.ID == dest.ID {
-			return fmt.Errorf("a wallet cannot self-transfer to itself")
-		}
-		if (source.IsMonthly() && source.IsGlobal()) && !(dest.IsMonthly() && dest.IsGlobal()) {
-			return nil
-		}
-
+	case sourceMonthlyOnly && destDoubleScoped:
 		return fmt.Errorf("a monthly wallet cannot self-transfer to another double scoped wallet (Global + Monthly)")
 
+	case sourceDoubleScoped && destDoubleScoped:
+		if source.LinkedWalletID == dest.ID {
+			return fmt.Errorf("cannot manually self-transfer between a Monthly wallet and its linked Global wallet — this happens automatically at month-end")
+		}
+
 	default:
-		return fmt.Errorf("self transfer not permitted from a %s wallet to a %s wallet", source.Scope, dest.Scope)
+		return nil
 	}
+
+	return nil
 }
 
 func validateInterWalletLoan(source, dest models.Wallet) error {
