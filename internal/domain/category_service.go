@@ -143,15 +143,19 @@ func (s *CategoryService) MonthlyTotals(now time.Time) ([]CategoryTotal, error) 
 	s.store.View(func(d storage.Data) {
 		categories = append(categories, d.Categories...)
 		for _, tx := range d.Transactions {
-			if tx.Type != models.Debit {
+			if tx.Type != models.Debit && tx.Type != models.Credit {
 				continue
 			}
 			if tx.Date.Year() != now.Year() || tx.Date.Month() != now.Month() {
 				continue
 			}
 			for _, c := range d.Categories {
-				if tx.Category == c.Name {
+				if tx.Category == c.Name && tx.Type == models.Debit {
 					totals[c.ID] += tx.Amount
+					break
+				}
+				if tx.Category == c.Name && tx.Type == models.Credit {
+					totals[c.ID] -= tx.Amount
 					break
 				}
 			}
@@ -175,12 +179,16 @@ func (s *CategoryService) GlobalTotals() ([]CategoryTotal, error) {
 	s.store.View(func(d storage.Data) {
 		categories = append(categories, d.Categories...)
 		for _, tx := range d.Transactions {
-			if tx.Type != models.Debit {
+			if tx.Type != models.Debit && tx.Type != models.Credit {
 				continue
 			}
 			for _, c := range d.Categories {
-				if tx.Category == c.Name {
+				if tx.Category == c.Name && tx.Type == models.Debit {
 					totals[c.ID] += tx.Amount
+					break
+				}
+				if tx.Category == c.Name && tx.Type == models.Credit {
+					totals[c.ID] -= tx.Amount
 					break
 				}
 			}

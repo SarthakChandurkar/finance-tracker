@@ -131,7 +131,8 @@ function updateTransactionFormFields() {
   const paymentInstrumentLabel = document.querySelector('label[for="tx-payment-instrument"]');
 
   if (categoryLabel?.parentElement) {
-    categoryLabel.parentElement.style.display = type === 'Debit' ? '' : 'none';
+    const categoryRequiredTypes = ['Credit', 'Debit'];
+    categoryLabel.parentElement.style.display = categoryRequiredTypes.includes(type) ? '' : 'none';
   }
   
   if (destinationLabel?.parentElement) {
