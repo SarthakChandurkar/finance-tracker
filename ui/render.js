@@ -125,11 +125,6 @@ export function renderAnalysisCharts(categoryData) {
   
   if (!valueCanvas || !percentCanvas) return;
   
-  // 1. Register the plugin globally if it exists
-  if (typeof ChartDataLabels !== 'undefined') {
-    Chart.register(ChartDataLabels);
-  }
-  
   const monthly = categoryData.monthly || [];
   const activeCategories = monthly.filter(c => Number(c.total) > 0);
   
@@ -146,30 +141,6 @@ export function renderAnalysisCharts(categoryData) {
   const dataPercentages = dataValues.map(v => totalSum > 0 ? Number(((v / totalSum) * 100).toFixed(1)) : 0);
   const backgroundColors = labels.map((_, i) => `hsl(${(i * 360) / labels.length}, 70%, 60%)`);
 
-  // 2. Dynamic config to push labels outside if the slice is < 5%
-  const getDatalabelsConfig = (isPercent) => ({
-    font: { weight: 'bold', size: 11 },
-    formatter: (value) => {
-      if (value === 0) return null;
-      return isPercent ? value + '%' : value;
-    },
-    anchor: (context) => {
-      const val = context.dataset.data[context.dataIndex];
-      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
-      return isSmall ? 'end' : 'center'; // Push to outer edge if small
-    },
-    align: (context) => {
-      const val = context.dataset.data[context.dataIndex];
-      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
-      return isSmall ? 'end' : 'center'; // Align outside if small
-    },
-    color: (context) => {
-      const val = context.dataset.data[context.dataIndex];
-      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
-      return isSmall ? '#475569' : '#ffffff'; // Dark slate if outside, white if inside
-    }
-  });
-
   if (valueChartInstance) valueChartInstance.destroy();
   valueChartInstance = new Chart(valueCanvas, {
     type: 'pie',
@@ -180,10 +151,14 @@ export function renderAnalysisCharts(categoryData) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: { padding: 30 }, // Prevents labels pushed outside from being cut off
       plugins: {
-        legend: { position: 'right' },
-        datalabels: getDatalabelsConfig(false)
+        legend: { 
+          position: 'bottom', 
+          labels: { boxWidth: 12, padding: 15 } 
+        },
+        tooltip: { 
+          callbacks: { label: (context) => ` ${context.label}: ${Number(context.parsed).toFixed(2)}` } 
+        }
       }
     }
   });
@@ -198,10 +173,14 @@ export function renderAnalysisCharts(categoryData) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      layout: { padding: 30 }, // Prevents labels pushed outside from being cut off
       plugins: {
-        legend: { position: 'right' },
-        datalabels: getDatalabelsConfig(true)
+        legend: { 
+          position: 'bottom', 
+          labels: { boxWidth: 12, padding: 15 } 
+        },
+        tooltip: { 
+          callbacks: { label: (context) => ` ${context.label}: ${context.parsed}%` } 
+        }
       }
     }
   });
