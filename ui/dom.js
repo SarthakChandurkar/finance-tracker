@@ -41,6 +41,12 @@ export const walletTableBody = document.querySelector('#wallet-table tbody');
 export const transactionTableBody = document.querySelector('#transaction-table tbody');
 export const categoryTableBody = document.querySelector('#category-table tbody');
 
+// Analysis View Elements
+export const analysisSearch = document.getElementById('analysis-search');
+export const analysisTableBody = document.querySelector('#analysis-transaction-table tbody');
+export const valuePieChartCtx = document.getElementById('value-pie-chart');
+export const percentPieChartCtx = document.getElementById('percent-pie-chart');
+
 // Dashboards & Ledgers
 export const monthlyWalletsEl = document.getElementById('monthly-wallets');
 export const globalWalletsEl = document.getElementById('global-wallets');

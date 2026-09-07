@@ -11,7 +11,7 @@ import {
   interWalletSettleCancel, systemStatus, monthEndButton, taskForm, taskTitleInput, 
   taskDueInput, deleteAllTasksBtn, confirmModal, confirmTitle, confirmMessage, 
   confirmDetails, confirmYes, confirmNo, profileToggle, profileDropdown, 
-  profileUsername, profileLogout
+  profileUsername, profileLogout, analysisSearch
 } from './dom.js';
 
 import { showToast, setFormError, fetchJSON, normalizeFormNumbers, formatDate, escapeHTML } from './utils.js';
@@ -21,7 +21,8 @@ import {
   editingWalletId, editingTransactionId, editingTaskId, pendingInterWalletSettlement,
   setPendingTransaction, setEditingWalletId, setEditingTransactionId, 
   setEditingTaskId, setPendingInterWalletSettlement, findWallet, setTxSort, setWalletSort,
-  refreshData, refreshTransactionsTab, refreshTasks, refreshWalletsTab, refreshCategoriesTab 
+  refreshData, refreshTransactionsTab, refreshTasks, refreshWalletsTab, refreshCategoriesTab,
+  refreshAnalysisTab, setAnalysisSearchQuery, setAnalysisTxSort 
 } from './state.js';
 
 // --- Constants & Helpers ---
@@ -53,6 +54,7 @@ function setActiveView(viewId) {
 
 const viewRefreshers = {
   dashboard: refreshData,
+  analysis: refreshAnalysisTab,
   transactions: refreshTransactionsTab,
   wallets: refreshWalletsTab,
   categories: refreshCategoriesTab,
@@ -77,6 +79,14 @@ navOverlay && navOverlay.addEventListener('click', () => {
   if (navMenu) navMenu.classList.remove('open');
   if (navOverlay) navOverlay.classList.remove('open');
 });
+
+// --- Analysis View Handlers ---
+if (analysisSearch) {
+  analysisSearch.addEventListener('input', (event) => {
+    setAnalysisSearchQuery(event.target.value);
+    refreshAnalysisTab();
+  });
+}
 
 // --- Profile Menu ---
 function closeProfileDropdown() {
@@ -529,6 +539,7 @@ document.addEventListener('click', (event) => {
     const tableId = th.closest('table').id;
     if (tableId === 'transaction-table') setTxSort(th.dataset.sort);
     else if (tableId === 'wallet-table') setWalletSort(th.dataset.sort);
+    else if (tableId === 'analysis-transaction-table') setAnalysisTxSort(th.dataset.sort);
     return;
   }
 

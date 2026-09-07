@@ -6,6 +6,9 @@
   <title>Finance Tracker</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="icon" type="image/png" href="favicon.png" />
+  <!-- Added Chart.js for Pie Charts -->
+  <script src="chart.js"></script>
+  <script src="chartjs-plugin-datalabels.min.js"></script>
 </head>
 <body>
   <div class="nav-overlay" id="nav-overlay"></div>
@@ -37,6 +40,7 @@
     
     <nav id="main-nav">
       <button data-view="dashboard" class="active">Dashboard</button>
+      <button data-view="analysis">Analysis</button>
       <button data-view="transactions">Transactions</button>
       <button data-view="wallets">Wallets</button>
       <button data-view="loan-ledger-tab">Loan-Ledger</button>
@@ -89,6 +93,57 @@
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ANALYSIS TAB -->
+      <section id="analysis" class="view">
+        <div class="panel">
+          <h3 class="section-title">Monthly Category Spends Breakdown</h3>
+          
+          <!-- Forced Flexbox and Inline Heights for Chart.js -->
+          <div style="display: flex; flex-wrap: wrap; gap: 2rem; justify-content: center; margin-top: 1.5rem; min-height: 300px;">
+            <div style="flex: 1 1 280px; display: flex; flex-direction: column; align-items: center; max-width: 400px;">
+              <h4 style="margin-top: 0; margin-bottom: 1rem; color: #475569;">Values Spent</h4>
+              <div style="position: relative; width: 100%; height: 260px;" id="value-chart-container">
+                <canvas id="value-pie-chart"></canvas>
+              </div>
+            </div>
+            
+            <div style="flex: 1 1 280px; display: flex; flex-direction: column; align-items: center; max-width: 400px;">
+              <h4 style="margin-top: 0; margin-bottom: 1rem; color: #475569;">Percentage Distribution</h4>
+              <div style="position: relative; width: 100%; height: 260px;" id="percent-chart-container">
+                <canvas id="percent-pie-chart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="display: flex; flex-direction: column;">
+          <div class="analysis-table-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem;">
+            <h3 class="section-title" style="margin: 0;">Detailed Transactions</h3>
+            <div style="flex: 1 1 300px; max-width: 500px;">
+              <input type="text" id="analysis-search" placeholder="Search transactions across all fields..." style="width: 100%;" />
+            </div>
+          </div>
+          <div class="table-wrapper" style="max-height: 50vh; overflow-y: auto;">
+            <table id="analysis-transaction-table" class="expandable-table">
+              <thead style="position: sticky; top: 0; z-index: 10;">
+                <tr>
+                  <th class="sortable" data-sort="date">Date & Time <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="type">Type <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="amount">Amount <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="source_wallet_id">Source <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="destination_wallet_id">Destination <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="category">Category <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="counterparty">Counterparty <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="payment_instrument">Instrument <span class="sort-icon"></span></th>
+                  <th class="sortable" data-sort="details">Details <span class="sort-icon"></span></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
           </div>
         </div>
       </section>

@@ -1,10 +1,12 @@
 // render.js — UI rendering and HTML templates
 
+
 import { escapeHTML, toDateOnly, formatDate } from './utils.js';
 import {
   walletTableBody, transactionTableBody, categoryTableBody,
   loanLedger, interWalletLoanLedger, monthlyWalletsEl, globalWalletsEl, monthlyTotalsEl, globalTotalsEl,
-  taskList, todayTasksEl, txDestination , loanLedger_settle, interWalletLoanLedger_settle
+  taskList, todayTasksEl, txDestination , loanLedger_settle, interWalletLoanLedger_settle,
+  analysisTableBody, valuePieChartCtx, percentPieChartCtx
 } from './dom.js';
 
 export function buildSelectOptions(select, values, includeEmpty = true) {
@@ -77,6 +79,132 @@ export function renderTransactions(transactions, wallets) {
       </td>
     </tr>
   `}).join('');
+}
+
+// --- Analysis View Rendering Components ---
+export function renderAnalysisTransactions(transactions, wallets) {
+  if (!analysisTableBody) return;
+  analysisTableBody.innerHTML = (transactions || []).map((t) => {
+    let typeClass = 'accumulated'; 
+    if (t.type === 'Debit') typeClass = 'spent';
+    else if (t.type === 'Credit' || t.type === 'Salary') typeClass = 'available';
+    else if (t.type === 'Inter-Wallet Loan') typeClass = 'iw-loan';
+    else if (t.type === 'Loan Received') typeClass = 'loan-received';
+    
+    const exactTime = t.date ? new Date(t.date).toLocaleString() : '';
+    const formattedAmount = typeof t.amount === 'number' ? t.amount.toFixed(2) : t.amount || '';
+    
+    return `
+    <tr data-id="${t.id}">
+      <td>${escapeHTML(exactTime || t.date || '')}</td>
+      <td><span class="stat-badge ${typeClass}">${t.type || ''}</span></td>
+      <td class="font-mono">${formattedAmount}</td>
+      <td>${walletLabelHTML(t.source_wallet_id, wallets)}</td>
+      <td>${walletLabelHTML(t.destination_wallet_id, wallets)}</td>
+      <td>${escapeHTML(t.category || '')}</td>
+      <td>${escapeHTML(t.counterparty || '')}</td>
+      <td>${escapeHTML(t.payment_instrument || '')}</td>
+      <td style="white-space: normal; min-width: 200px;">${escapeHTML(t.details || '')}</td>
+    </tr>
+  `}).join('');
+}
+
+export function renderAnalysisSortIndicators(config) {
+  document.querySelectorAll('#analysis-transaction-table th.sortable').forEach(th => {
+    th.classList.remove('sort-asc', 'sort-desc');
+    if (th.dataset.sort === config.key) th.classList.add(config.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+  });
+}
+
+let valueChartInstance = null;
+let percentChartInstance = null;
+
+export function renderAnalysisCharts(categoryData) {
+  const valueCanvas = document.getElementById('value-pie-chart');
+  const percentCanvas = document.getElementById('percent-pie-chart');
+  
+  if (!valueCanvas || !percentCanvas) return;
+  
+  // 1. Register the plugin globally if it exists
+  if (typeof ChartDataLabels !== 'undefined') {
+    Chart.register(ChartDataLabels);
+  }
+  
+  const monthly = categoryData.monthly || [];
+  const activeCategories = monthly.filter(c => Number(c.total) > 0);
+  
+  if (activeCategories.length === 0) {
+     document.getElementById('value-chart-container').innerHTML = '<p style="color:#64748b; text-align:center; margin-top: 4rem;">No spend data for this month.</p>';
+     document.getElementById('percent-chart-container').innerHTML = '<p style="color:#64748b; text-align:center; margin-top: 4rem;">No spend data for this month.</p>';
+     return;
+  }
+  
+  const labels = activeCategories.map(c => c.category_name);
+  const dataValues = activeCategories.map(c => Number(c.total));
+  const totalSum = dataValues.reduce((a, b) => a + b, 0);
+  
+  const dataPercentages = dataValues.map(v => totalSum > 0 ? Number(((v / totalSum) * 100).toFixed(1)) : 0);
+  const backgroundColors = labels.map((_, i) => `hsl(${(i * 360) / labels.length}, 70%, 60%)`);
+
+  // 2. Dynamic config to push labels outside if the slice is < 5%
+  const getDatalabelsConfig = (isPercent) => ({
+    font: { weight: 'bold', size: 11 },
+    formatter: (value) => {
+      if (value === 0) return null;
+      return isPercent ? value + '%' : value;
+    },
+    anchor: (context) => {
+      const val = context.dataset.data[context.dataIndex];
+      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
+      return isSmall ? 'end' : 'center'; // Push to outer edge if small
+    },
+    align: (context) => {
+      const val = context.dataset.data[context.dataIndex];
+      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
+      return isSmall ? 'end' : 'center'; // Align outside if small
+    },
+    color: (context) => {
+      const val = context.dataset.data[context.dataIndex];
+      const isSmall = isPercent ? val < 5 : (val / totalSum) < 0.05;
+      return isSmall ? '#475569' : '#ffffff'; // Dark slate if outside, white if inside
+    }
+  });
+
+  if (valueChartInstance) valueChartInstance.destroy();
+  valueChartInstance = new Chart(valueCanvas, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{ data: dataValues, backgroundColor: backgroundColors, borderWidth: 1 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: 30 }, // Prevents labels pushed outside from being cut off
+      plugins: {
+        legend: { position: 'right' },
+        datalabels: getDatalabelsConfig(false)
+      }
+    }
+  });
+
+  if (percentChartInstance) percentChartInstance.destroy();
+  percentChartInstance = new Chart(percentCanvas, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{ data: dataPercentages, backgroundColor: backgroundColors, borderWidth: 1 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      layout: { padding: 30 }, // Prevents labels pushed outside from being cut off
+      plugins: {
+        legend: { position: 'right' },
+        datalabels: getDatalabelsConfig(true)
+      }
+    }
+  });
 }
 
 export function renderWallets(wallets) {

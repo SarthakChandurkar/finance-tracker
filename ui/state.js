@@ -6,7 +6,8 @@ import {
   renderLoanLedger, renderInterWalletLoanLedger, renderLoanLedger_settle, 
   renderInterWalletLoanLedger_settle, renderDashboard,
   renderTasks, renderTodayTasks, showTasksConnecting, buildSelectOptions,
-  populateDestinationOptions, renderSortIndicators
+  populateDestinationOptions, renderSortIndicators,
+  renderAnalysisTransactions, renderAnalysisSortIndicators, renderAnalysisCharts
 } from './render.js';
 import {
   txSource, txCategory, sourceCategorySelect, destCategorySelect, settleSource
@@ -17,6 +18,7 @@ export let currentWallets = [];
 export let currentCategories = [];
 export let currentTransactions = [];
 export let currentTasks = [];
+export let currentCategoryTotals = { monthly: [], global: [] };
 export let pendingTransaction = null;
 export let editingWalletId = null;
 export let editingTransactionId = null;
@@ -25,9 +27,11 @@ export let confirmCallback = null;
 export let tasksLoaded = false;
 export let pendingInterWalletSettlement = null;
 
-// --- Sort Configs ---
+// --- Sort & Search Configs ---
 export let txSortConfig = { key: 'date', dir: 'desc' };
 export let walletSortConfig = { key: 'scope', dir: 'asc' };
+export let analysisTxSortConfig = { key: 'date', dir: 'desc' };
+export let analysisSearchQuery = '';
 
 // --- State Setters for main.js ---
 export const setPendingTransaction = (val) => pendingTransaction = val;
@@ -36,6 +40,7 @@ export const setEditingTransactionId = (val) => editingTransactionId = val;
 export const setEditingTaskId = (val) => editingTaskId = val;
 export const setConfirmCallback = (val) => confirmCallback = val;
 export const setPendingInterWalletSettlement = (val) => pendingInterWalletSettlement = val;
+export const setAnalysisSearchQuery = (val) => analysisSearchQuery = val;
 
 // --- Sorting Logic ---
 export function applySorts() {
@@ -79,6 +84,62 @@ export function setWalletSort(key) {
   applySorts();
   renderWallets(currentWallets);
   renderSortIndicators(txSortConfig, walletSortConfig);
+}
+
+// --- Analysis Specific Filtering & Sorting ---
+export function getFilteredAndSortedAnalysisTransactions() {
+  let txs = [...currentTransactions];
+  
+  if (analysisSearchQuery) {
+    const q = analysisSearchQuery.toLowerCase();
+    txs = txs.filter(t => {
+      const source = currentWallets.find(w => String(w.id) === String(t.source_wallet_id))?.name || '';
+      const dest = currentWallets.find(w => String(w.id) === String(t.destination_wallet_id))?.name || '';
+      
+      return (
+        (t.date && String(t.date).toLowerCase().includes(q)) ||
+        (t.type && String(t.type).toLowerCase().includes(q)) ||
+        (t.amount && String(t.amount).toLowerCase().includes(q)) ||
+        source.toLowerCase().includes(q) ||
+        dest.toLowerCase().includes(q) ||
+        (t.category && String(t.category).toLowerCase().includes(q)) ||
+        (t.counterparty && String(t.counterparty).toLowerCase().includes(q)) ||
+        (t.payment_instrument && String(t.payment_instrument).toLowerCase().includes(q)) ||
+        (t.details && String(t.details).toLowerCase().includes(q))
+      );
+    });
+  }
+
+  const compare = (a, b, config) => {
+    let vA = a[config.key];
+    let vB = b[config.key];
+
+    if (['source_wallet_id', 'destination_wallet_id'].includes(config.key)) {
+        vA = currentWallets.find(w => String(w.id) === String(vA))?.name || '';
+        vB = currentWallets.find(w => String(w.id) === String(vB))?.name || '';
+    }
+
+    if (config.key === 'amount') {
+        vA = Number(vA) || 0;
+        vB = Number(vB) || 0;
+    } else {
+        vA = String(vA || '').toLowerCase();
+        vB = String(vB || '').toLowerCase();
+    }
+
+    if (vA < vB) return config.dir === 'asc' ? -1 : 1;
+    if (vA > vB) return config.dir === 'asc' ? 1 : -1;
+    return 0;
+  };
+
+  txs.sort((a, b) => compare(a, b, analysisTxSortConfig));
+  return txs;
+}
+
+export function setAnalysisTxSort(key) {
+  if (analysisTxSortConfig.key === key) analysisTxSortConfig.dir = analysisTxSortConfig.dir === 'asc' ? 'desc' : 'asc';
+  else { analysisTxSortConfig.key = key; analysisTxSortConfig.dir = 'asc'; }
+  refreshAnalysisTab();
 }
 
 // --- Helper Functions ---
@@ -199,6 +260,20 @@ export async function refreshTransactionsTab() {
   }
 }
 
+export async function refreshAnalysisTab() {
+  try {
+    if (!currentTransactions.length || !currentCategoryTotals.monthly.length) {
+      await refreshData();
+    }
+    const filteredAndSorted = getFilteredAndSortedAnalysisTransactions();
+    renderAnalysisTransactions(filteredAndSorted, currentWallets);
+    renderAnalysisSortIndicators(analysisTxSortConfig);
+    renderAnalysisCharts(currentCategoryTotals);
+  } catch (err) {
+    showToast(err.message || 'Failed to refresh analysis', 'error');
+  }
+}
+
 export async function refreshData() {
   try {
     const [wallets, categories, transactions, walletTotals, categoryTotalsData, loanEntries, interWalletLoanEntries] = await Promise.all([
@@ -213,6 +288,7 @@ export async function refreshData() {
     currentWallets = wallets || [];
     currentCategories = categories || [];
     currentTransactions = transactions || [];
+    currentCategoryTotals = categoryTotalsData || { monthly: [], global: [] };
     
     applySorts();
     
