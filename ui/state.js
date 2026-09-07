@@ -262,9 +262,9 @@ export async function refreshTransactionsTab() {
 
 export async function refreshAnalysisTab() {
   try {
-    if (!currentTransactions.length || !currentCategoryTotals.monthly.length) {
-      await refreshData();
-    }
+    // Unconditionally fetch fresh data from the server
+    await refreshData();
+    
     const filteredAndSorted = getFilteredAndSortedAnalysisTransactions();
     renderAnalysisTransactions(filteredAndSorted, currentWallets);
     renderAnalysisSortIndicators(analysisTxSortConfig);
