@@ -204,27 +204,27 @@ export async function loadCategories() {
 }
 
 export async function refreshTasks() {
-  if (!tasksLoaded) showTasksConnecting();
-  try {
-    const rawTasks = await fetchJSON('/api/tasks');
+  // if (!tasksLoaded) showTasksConnecting();
+  // try {
+  //   const rawTasks = await fetchJSON('/api/tasks');
     
-    currentTasks = (rawTasks || []).map(t => {
-      t.id = t._id || t.id;
-      return t;
-    });
+  //   currentTasks = (rawTasks || []).map(t => {
+  //     t.id = t._id || t.id;
+  //     return t;
+  //   });
     
-    tasksLoaded = true;
-    renderTasks(currentTasks, editingTaskId);
-    renderTodayTasks(currentTasks);
-  } catch (err) {
-    showToast(err.message || 'Failed to load tasks', 'error');
-    if (!tasksLoaded) {
-      const taskList = document.getElementById('task-list');
-      const todayTasksEl = document.getElementById('today-tasks');
-      if (taskList) taskList.innerHTML = '<li class="task-empty">Couldn\u2019t reach the task server. Try again shortly.</li>';
-      if (todayTasksEl) todayTasksEl.innerHTML = '<p class="note">Couldn\u2019t reach the task server.</p>';
-    }
-  }
+  //   tasksLoaded = true;
+  //   renderTasks(currentTasks, editingTaskId);
+  //   renderTodayTasks(currentTasks);
+  // } catch (err) {
+  //   showToast(err.message || 'Failed to load tasks', 'error');
+  //   if (!tasksLoaded) {
+  //     const taskList = document.getElementById('task-list');
+  //     const todayTasksEl = document.getElementById('today-tasks');
+  //     if (taskList) taskList.innerHTML = '<li class="task-empty">Couldn\u2019t reach the task server. Try again shortly.</li>';
+  //     if (todayTasksEl) todayTasksEl.innerHTML = '<p class="note">Couldn\u2019t reach the task server.</p>';
+  //   }
+  // }
 }
 
 export async function refreshWalletsTab() {

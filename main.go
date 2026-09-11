@@ -19,7 +19,8 @@ import (
 
 	"financetracker/internal/domain"
 	"financetracker/internal/models"
-	"financetracker/internal/remote"
+
+	// "financetracker/internal/remote"
 	"financetracker/internal/storage"
 )
 
@@ -42,8 +43,8 @@ func init() {
 }
 
 type apiServer struct {
-	store       *storage.Store
-	tasks       *remote.TodoClient
+	store *storage.Store
+	// tasks       *remote.TodoClient
 	authService *domain.AuthService
 }
 
@@ -92,19 +93,19 @@ func main() {
 		log.Fatalf("failed to load data from redis: %v", err)
 	}
 
-	todoServerURL := os.Getenv("TODO_SERVER_URL")
-	if todoServerURL == "" {
-		todoServerURL = remote.DefaultTodoServerURL
-	}
+	// todoServerURL := os.Getenv("TODO_SERVER_URL")
+	// if todoServerURL == "" {
+	// 	todoServerURL = remote.DefaultTodoServerURL
+	// }
 
-	todoServerTimeout := remote.TodoServerTimeout
-	if raw := os.Getenv("TODO_SERVER_TIMEOUT_SECONDS"); raw != "" {
-		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
-			todoServerTimeout = time.Duration(secs) * time.Second
-		} else {
-			log.Printf("invalid TODO_SERVER_TIMEOUT_SECONDS=%q, using default of %s", raw, todoServerTimeout)
-		}
-	}
+	// todoServerTimeout := remote.TodoServerTimeout
+	// if raw := os.Getenv("TODO_SERVER_TIMEOUT_SECONDS"); raw != "" {
+	// 	if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+	// 		todoServerTimeout = time.Duration(secs) * time.Second
+	// 	} else {
+	// 		log.Printf("invalid TODO_SERVER_TIMEOUT_SECONDS=%q, using default of %s", raw, todoServerTimeout)
+	// 	}
+	// }
 
 	sessionTTL := 20 * time.Minute
 	if raw := os.Getenv("SESSION_TTL_MINUTES"); raw != "" {
@@ -120,8 +121,8 @@ func main() {
 	loadAllowedOrigins()
 
 	server := &apiServer{
-		store:       store,
-		tasks:       remote.NewTodoClient(todoServerURL, todoServerTimeout),
+		store: store,
+		// tasks:       remote.NewTodoClient(todoServerURL, todoServerTimeout),
 		authService: domain.NewAuthService(store, sessionStore),
 	}
 
@@ -190,8 +191,8 @@ func (s *apiServer) routes() http.Handler {
 	mux.HandleFunc("/api/schedule/end", s.handleScheduleEnd)
 	mux.HandleFunc("/api/funding-options", s.handleFundingOptions)
 
-	mux.HandleFunc("/api/tasks", s.handleTasks)
-	mux.HandleFunc("/api/tasks/", s.handleTaskbyID)
+	// mux.HandleFunc("/api/tasks", s.handleTasks)
+	// mux.HandleFunc("/api/tasks/", s.handleTaskbyID)
 
 	mux.Handle("/", noCacheFileServer("ui"))
 
@@ -764,7 +765,7 @@ func (s *apiServer) handleSettleInterWalletLoan(w http.ResponseWriter, r *http.R
 }
 
 // *******************Handler Methods for To-Do List (Tasks) Feature***************************
-
+/*
 func (s *apiServer) handleTasks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet, http.MethodPost, http.MethodDelete:
@@ -813,3 +814,4 @@ func (s *apiServer) proxyTasks(w http.ResponseWriter, r *http.Request, pathSuffi
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(resp.Body)
 }
+*/
