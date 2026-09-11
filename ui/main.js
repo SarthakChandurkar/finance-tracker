@@ -571,14 +571,24 @@ document.addEventListener('click', (event) => {
   }
   
   if (target.classList.contains('edit-transaction')) {
+    if (target.classList.contains('another-tab-btn')) {
+      setActiveView('transactions');
+    }
     openEditTransaction(target.dataset.id);
   }
   
   if (target.classList.contains('delete-transaction')) {
     openConfirm('Delete transaction', 'Delete this transaction? This action cannot be undone.', '', () => {
-      return fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
+      if (target.classList.contains('analysis-tab-delete-transaction-btn')) {
+        return fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
+        .then(() => { refreshAnalysisTab(); showToast('Transaction deleted', 'success'); })
+        .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete transaction', 'error'));
+      }
+      else{
+        return fetchJSON(`/api/transactions/${target.dataset.id}`, { method: 'DELETE' })
         .then(() => { refreshTransactionsTab(); showToast('Transaction deleted', 'success'); })
         .catch((err) => showToast(sanitizeErrorMsg(err.message) || 'Failed to delete transaction', 'error'));
+      } 
     });
   }
   

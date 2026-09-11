@@ -105,6 +105,12 @@ export function renderAnalysisTransactions(transactions, wallets) {
       <td>${escapeHTML(t.counterparty || '')}</td>
       <td>${escapeHTML(t.payment_instrument || '')}</td>
       <td style="white-space: normal; min-width: 200px;">${escapeHTML(t.details || '')}</td>
+      <td>
+      <div class="actions-row mt-1">
+        <button class="btn-small edit-transaction another-tab-btn" data-id="${t.id}">Edit</button>
+        <button class="btn-small danger-btn delete-transaction analysis-tab-delete-transaction-btn" data-id="${t.id}">Delete</button>
+      </div>
+      </td>
     </tr>
   `}).join('');
 }

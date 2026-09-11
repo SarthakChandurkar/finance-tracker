@@ -1,11 +1,11 @@
 package domain
 
 import (
-	"fmt"
-	"time"
-
 	"financetracker/internal/models"
 	"financetracker/internal/storage"
+	"fmt"
+	"sort"
+	"time"
 )
 
 type WalletService struct {
@@ -493,6 +493,10 @@ func (s *WalletService) AllGlobalBreakdowns() ([]GlobalBreakdown, error) {
 			}
 			results = append(results, breakdown)
 		}
+	})
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Accumulated > results[j].Accumulated
 	})
 	return results, nil
 }

@@ -1,11 +1,11 @@
 package domain
 
 import (
-	"fmt"
-	"time"
-
 	"financetracker/internal/models"
 	"financetracker/internal/storage"
+	"fmt"
+	"sort"
+	"time"
 )
 
 type CategoryService struct {
@@ -170,6 +170,10 @@ func (s *CategoryService) MonthlyTotals(now time.Time) ([]CategoryTotal, error) 
 			Total:        totals[c.ID],
 		})
 	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Total > results[j].Total
+	})
 	return results, nil
 }
 
