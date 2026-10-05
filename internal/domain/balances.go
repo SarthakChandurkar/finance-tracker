@@ -75,7 +75,7 @@ func globalAccumulated(d *storage.Data, walletID string) (float64, error) {
 			if tx.SourceWalletID == walletID {
 				total -= tx.Amount
 			}
-		case models.Credit, models.Salary, models.LoanReceived , models.InterWalletLoan:
+		case models.Credit, models.Salary, models.LoanReceived:
 			if tx.DestinationWalletID == walletID {
 				total += tx.Amount
 			}
@@ -89,6 +89,9 @@ func globalAccumulated(d *storage.Data, walletID string) (float64, error) {
 		case models.InterWalletLoan:
 			if tx.SourceWalletID == walletID {
 				total -= tx.Amount
+			}
+			if tx.DestinationWalletID == walletID {
+				total += tx.Amount
 			}
 		}
 	}
