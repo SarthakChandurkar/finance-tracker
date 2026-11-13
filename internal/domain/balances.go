@@ -90,6 +90,9 @@ func globalAccumulated(d *storage.Data, walletID string) (float64, error) {
 			if tx.SourceWalletID == walletID {
 				total -= tx.Amount
 			}
+			if tx.DestinationWalletID == walletID {
+				total += tx.Amount
+			}
 		}
 	}
 	return total, nil
